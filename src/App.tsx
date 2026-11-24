@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { deleteCampaign, finishDay, loadAll, newCampaign, saveCampaign, type Campaign } from './campaign/campaign'
+import { deleteCampaign, finishDay, loadAll, newCampaign, saveCampaign, tutorialCampaign, type Campaign } from './campaign/campaign'
 import { migrate, newDay, tryApply } from './engine/engine'
 import type { Game, Intent } from './engine/types'
 import { Board } from './ui/Board'
@@ -55,7 +55,7 @@ export default function App() {
 
 	const startDay = (c: Campaign) => {
 		const g = newDay({
-			seed: Math.floor(Math.random() * 2 ** 31),
+			seed: c.tutorial ? 20261124 : Math.floor(Math.random() * 2 ** 31),
 			day: c.day,
 			rangers: c.rangers.map((r) => ({ name: r.name, role: r.role, aspect: r.aspect, deck: r.deck })),
 			location: c.location,
@@ -92,8 +92,15 @@ export default function App() {
 				dispatch={dispatch}
 				undo={undo}
 				canUndo={history.length > 0}
-				onExit={() => setScreen({ s: 'campaign', id: current.id })}
+				onExit={() => setScreen(current.tutorial ? { s: 'home' } : { s: 'campaign', id: current.id })}
+				coach={!!current.tutorial}
 				onDayOver={() => {
+					if (current.tutorial) {
+						deleteCampaign(current.id)
+						setCampaigns(loadAll())
+						setScreen({ s: 'home' })
+						return
+					}
 					update(finishDay(current, current.game!))
 					setHistory([])
 					setScreen({ s: 'campaign', id: current.id })
@@ -114,8 +121,14 @@ export default function App() {
 		body = (
 			<Home
 				campaigns={campaigns}
-				open={(c) => setScreen({ s: 'campaign', id: c.id })}
+				open={(c) => setScreen(c.tutorial ? { s: 'day', id: c.id } : { s: 'campaign', id: c.id })}
 				create={() => setScreen({ s: 'new' })}
+				tutorial={(name) => {
+					const old = loadAll().filter((x) => x.tutorial)
+					for (const o of old) deleteCampaign(o.id)
+					const c = tutorialCampaign(name)
+					startDay(c)
+				}}
 				remove={(c) => {
 					deleteCampaign(c.id)
 					setCampaigns(loadAll())

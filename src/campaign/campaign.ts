@@ -40,6 +40,8 @@ export interface Campaign {
 	/** The day in progress, if any. */
 	game: Game | null
 	lead: number
+	/** The learn-to-play day (coach on, not a real campaign). */
+	tutorial?: boolean
 }
 
 export const LINGERING_INJURY = '01240'
@@ -71,6 +73,13 @@ export function newCampaign(name: string, rangers: CampaignRanger[]): Campaign {
 		game: null,
 		lead: 0,
 	}
+}
+
+export function tutorialCampaign(name: string): Campaign {
+	const c = newCampaign('Tutorial', [prebuiltRanger('UndauntedSeeker', name || 'Ranger')])
+	c.tutorial = true
+	c.entries = []
+	return c
 }
 
 export const prebuiltRanger = (key: string, name: string): CampaignRanger => ({

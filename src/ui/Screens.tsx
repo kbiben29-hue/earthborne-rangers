@@ -26,7 +26,8 @@ import { MapView } from './Board'
 
 // ------------------------------------------------------------------ home
 
-export function Home({ campaigns, open, create, remove }: { campaigns: Campaign[]; open: (c: Campaign) => void; create: () => void; remove: (c: Campaign) => void }) {
+export function Home({ campaigns, open, create, remove, tutorial }: { campaigns: Campaign[]; open: (c: Campaign) => void; create: () => void; remove: (c: Campaign) => void; tutorial: (name: string) => void }) {
+	const [tname, setTname] = useState('')
 	return (
 		<div className="screen home">
 			<header className="hero">
@@ -35,8 +36,23 @@ export function Home({ campaigns, open, create, remove }: { campaigns: Campaign[
 				</h1>
 				<p>Walk the Valley: the Lure of the Valley campaign, on your phone, tablet or computer.</p>
 			</header>
+			<div className="panel learn">
+				<h3>New to Earthborne Rangers?</h3>
+				<p>Play a coached practice day: one Ranger, starting at Lone Tree Station. The coach explains each step — path cards, tests, fatigue, the challenge deck, travel — and makes a good move glow.</p>
+				{campaigns.some((c) => c.tutorial && c.game && !c.game.ended) && (
+					<button className="big" onClick={() => open(campaigns.find((c) => c.tutorial)!)}>
+						Continue the tutorial
+					</button>
+				)}
+				<div className="row-input">
+					<input placeholder="Your Ranger’s name" value={tname} onChange={(e) => setTname(e.target.value)} />
+					<button className="primary" onClick={() => tutorial(tname.trim())}>
+						Start the tutorial
+					</button>
+				</div>
+			</div>
 			<div className="cards-list">
-				{campaigns.map((c) => (
+				{campaigns.filter((c) => !c.tutorial).map((c) => (
 					<div key={c.id} className="campaign-card">
 						<div>
 							<b>{c.name}</b>

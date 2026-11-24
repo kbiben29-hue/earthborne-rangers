@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMotion } from './motion'
+import { coachFor, eventNote, INTRO, type CoachStep } from './coach'
 import { ASPECTS, card, CARDS, CHALLENGE, MISSIONS_CORE, SETS, TERRAINS, type Aspect } from '../data/data'
 import {
 	attachments,
@@ -48,6 +49,7 @@ export function Board({
 	onExit,
 	onDayOver,
 	hooks,
+	coach = false,
 }: {
 	g: Game
 	dispatch: Dispatch
@@ -56,8 +58,15 @@ export function Board({
 	onExit: () => void
 	onDayOver: () => void
 	hooks: CampaignHooks
+	coach?: boolean
 }) {
 	const [sel, setSel] = useState<Sel>(null)
+	const [intro, setIntro] = useState(() => (coach && g.round <= 1 && g.log.length < 30 ? 0 : -1))
+	const [coachOn, setCoachOn] = useState(coach)
+	const [coachMin, setCoachMin] = useState(false)
+	const [seen, setSeen] = useState<Set<string>>(() => new Set())
+	const [note, setNote] = useState<CoachStep | null>(null)
+	const prevG = useRef(g)
 	const [pick, setPick] = useState<Pick>(null)
 	const [bubble, setBubble] = useState<{ uid: number; x: number; y: number } | null>(null)
 	const [me, setMe] = useState(0)
@@ -89,6 +98,20 @@ export function Board({
 		window.addEventListener('keydown', k)
 		return () => window.removeEventListener('keydown', k)
 	}, [])
+
+	// coach: one-off notes when something new happens, and the step for right now
+	useEffect(() => {
+		if (!coachOn) return
+		const n = eventNote(prevG.current, g, seen)
+		prevG.current = g
+		if (n) {
+			setNote(n)
+			setSeen((s) => new Set(s).add(n.key))
+		}
+	}, [g, coachOn, seen])
+	const step = coachOn ? coachFor(g, me, seen) : null
+	const hint = step?.hint ?? {}
+	const coachBtn = (k: string) => (hint.buttons?.includes(k) ? 'coach' : '')
 
 	const R = g.rangers[me]
 	const turnWhy = canTakeTurn(g, me)
@@ -147,7 +170,7 @@ export function Board({
 		const inst = g.inst[uid]
 		if (!inst) return null
 		const att = attachments(g, uid)
-		const glow = choosing?.options.includes(uid) ? 'pick' : pick?.ok(uid) ? 'pick' : usable(uid) ? 'use' : ''
+		const glow = hint.uids?.includes(uid) && (!choosing || choosing.options.includes(uid)) && (!pick || pick.ok(uid)) ? 'coach' : choosing?.options.includes(uid) ? 'pick' : pick?.ok(uid) ? 'pick' : usable(uid) ? 'use' : ''
 		return (
 			<div className={`stack ${small ? 'small' : ''}`} key={uid}>
 				<div onContextMenu={(e) => inspect(uid, e)} className={`glow-${glow}`}>
@@ -320,12 +343,12 @@ export function Board({
 					{idle && (
 						<span className="acts">
 							{COMMON_TESTS.map((t) => (
-								<button key={t.key} className={`act act-${t.aspect}`} disabled={!myTurnOk || R.energy[t.aspect] < 1} onClick={() => startCommon(t.key)} title={t.text}>
+								<button key={t.key} className={`act act-${t.aspect} ${coachBtn(t.key)}`} disabled={!myTurnOk || R.energy[t.aspect] < 1} onClick={() => startCommon(t.key)} title={t.text}>
 									<b>{t.aspect}</b>
 									{t.name}
 								</button>
 							))}
-							<button disabled={R.rested} onClick={() => dispatch({ t: 'rest', ranger: me })} className="act rest" title="Done for this round">
+							<button disabled={R.rested} onClick={() => dispatch({ t: 'rest', ranger: me })} className={`act rest ${coachBtn('rest')}`} title="Done for this round">
 								<b>✓</b>Rest
 							</button>
 						</span>
@@ -340,7 +363,7 @@ export function Board({
 						return (
 							<div
 								key={i + id}
-								className={`hcard ${can ? 'glow-play' : ''} ${drag?.index === i ? 'dragging' : ''}`}
+								className={`hcard ${can ? 'glow-play' : ''} ${hint.hand?.includes(i) ? 'coach' : ''} ${drag?.index === i ? 'dragging' : ''}`}
 								style={{ ['--r' as string]: `${(i - mid) * Math.min(4, 24 / n)}deg`, ['--y' as string]: `${Math.abs(i - mid) ** 1.6 * 2}px` }}
 								onPointerDown={(e) => onHandDown(i, e)}
 								onContextMenu={(e) => {
@@ -364,9 +387,70 @@ export function Board({
 				</div>
 			)}
 
+			{coachOn && intro < 0 && (step || note) && (
+				<div className={`coach-panel ${coachMin ? 'min' : ''}`}>
+					{coachMin ? (
+						<button className="coach-pill" onClick={() => setCoachMin(false)}>
+							🧭 Coach
+						</button>
+					) : (
+						<>
+							<div className="coach-head">
+								<b>🧭 {note ? note.title : step!.title}</b>
+								<span>
+									<button className="ghost" title="Make smaller" onClick={() => setCoachMin(true)}>
+										–
+									</button>
+									<button className="ghost" title="Turn the coach off" onClick={() => setCoachOn(false)}>
+										×
+									</button>
+								</span>
+							</div>
+							<p>{note ? note.body : step!.body}</p>
+							{note && (
+								<button
+									className="primary"
+									onClick={() => {
+										setNote(null)
+									}}
+								>
+									Got it
+								</button>
+							)}
+						</>
+					)}
+				</div>
+			)}
+			{coachOn && intro >= 0 && (
+				<div className="drawer intro" onClick={() => {}}>
+					<div className="intro-card">
+						<small>
+							Tutorial · {intro + 1} / {INTRO.length}
+						</small>
+						<h2>{INTRO[intro].title}</h2>
+						{INTRO[intro].body.split('\n').map((l, k) => (
+							<p key={k}>{l}</p>
+						))}
+						<div className="btns">
+							{intro > 0 && <button onClick={() => setIntro(intro - 1)}>Back</button>}
+							<button className="primary" onClick={() => setIntro(intro + 1 < INTRO.length ? intro + 1 : -1)}>
+								{intro + 1 < INTRO.length ? 'Next' : 'Let’s go'}
+							</button>
+							<button className="ghost" onClick={() => setIntro(-1)}>
+								Skip
+							</button>
+						</div>
+					</div>
+				</div>
+			)}
+
 			<div className="tray">
 				<LastTest g={g} />
-				{head && !(choosing && choosing.max === 1) && <PromptPanel g={g} head={head} dispatch={dispatch} setPick={setPick} onDayOver={onDayOver} hooks={hooks} />}
+				{head && !(choosing && choosing.max === 1) && (
+					<div className={coachOn && hint.buttons?.length ? `coached ${hint.buttons.map((b) => `c-${b}`).join(' ')}` : ''}>
+						<PromptPanel g={g} head={head} dispatch={dispatch} setPick={setPick} onDayOver={onDayOver} hooks={hooks} coachEnergy={coachOn ? hint.energy : undefined} tutorial={coach} />
+					</div>
+				)}
 			</div>
 
 			{bubble && g.inst[bubble.uid] && (
@@ -429,7 +513,7 @@ export function Board({
 				</div>
 			)}
 			{panel === 'menu' && (
-				<Menu g={g} me={me} manual={manual} setManual={setManual} dispatch={dispatch} close={() => setPanel('none')} openSearch={() => setPanel('search')} openMap={() => setPanel('map')} onExit={onExit} hooks={hooks} />
+				<Menu coachOn={coachOn} setCoachOn={setCoachOn} g={g} me={me} manual={manual} setManual={setManual} dispatch={dispatch} close={() => setPanel('none')} openSearch={() => setPanel('search')} openMap={() => setPanel('map')} onExit={onExit} hooks={hooks} />
 			)}
 			{panel === 'search' && <Search g={g} me={me} dispatch={dispatch} close={() => setPanel('none')} />}
 			{panel === 'map' && (
@@ -458,12 +542,12 @@ function Pile({ label, n, back, face, anchor, onClick, tilt }: { label: string; 
 
 const PHASE: Record<Game['phase'], string> = { setup: 'Setting up', path: 'Path cards', turns: 'Ranger turns', travel: 'Travel', refresh: 'Refresh', over: 'Day over' }
 
-function PromptPanel({ g, head, dispatch, setPick, onDayOver, hooks }: { g: Game; head: Prompt; dispatch: Dispatch; setPick: (p: Pick) => void; onDayOver: () => void; hooks: CampaignHooks }) {
+function PromptPanel({ g, head, dispatch, setPick, onDayOver, hooks, coachEnergy, tutorial }: { g: Game; head: Prompt; dispatch: Dispatch; setPick: (p: Pick) => void; onDayOver: () => void; hooks: CampaignHooks; coachEnergy?: number; tutorial?: boolean }) {
 	switch (head.kind) {
 		case 'mulligan':
 			return <Mulligan g={g} r={head.ranger} dispatch={dispatch} />
 		case 'test':
-			return <Commit g={g} head={head} dispatch={dispatch} />
+			return <Commit key={g.log.length} g={g} head={head} dispatch={dispatch} coachEnergy={coachEnergy} />
 		case 'choose':
 			return <Choose g={g} head={head} dispatch={dispatch} />
 		case 'ask':
@@ -506,7 +590,7 @@ function PromptPanel({ g, head, dispatch, setPick, onDayOver, hooks }: { g: Game
 					<p>{head.reason}</p>
 					{g.lingering.length > 0 && <p>{g.lingering.map((r) => g.rangers[r].name).join(' and ')} add{g.lingering.length === 1 ? 's' : ''} a Lingering Injury to their deck.</p>}
 					<button className="primary" onClick={onDayOver}>
-						Record the day in the campaign
+						{tutorial ? 'Finish the tutorial' : 'Record the day in the campaign'}
 					</button>
 				</div>
 			)
@@ -547,13 +631,13 @@ function Mulligan({ g, r, dispatch }: { g: Game; r: number; dispatch: Dispatch }
 	)
 }
 
-function Commit({ g, head, dispatch }: { g: Game; head: Extract<Prompt, { kind: 'test' }>; dispatch: Dispatch }) {
+function Commit({ g, head, dispatch, coachEnergy }: { g: Game; head: Extract<Prompt, { kind: 'test' }>; dispatch: Dispatch; coachEnergy?: number }) {
 	const R = g.rangers[head.ranger]
 	const opt = testOptions(g, head)
 	const [swap, setSwap] = useState(false)
 	const aspect = swap && opt.swap ? opt.swap.to : head.aspect
 	const max = R.energy[aspect]
-	const [energy, setEnergy] = useState(Math.min(max, Math.max(1, head.diff)))
+	const [energy, setEnergy] = useState(Math.min(max, coachEnergy ?? Math.max(1, head.diff)))
 	const [disc, setDisc] = useState<number[]>([])
 	const [vers, setVers] = useState<number[]>([])
 	const [extra, setExtra] = useState(0)
@@ -682,7 +766,7 @@ function Commit({ g, head, dispatch }: { g: Game; head: Extract<Prompt, { kind: 
 			</p>
 			<div className="btns">
 				<button
-					className="primary"
+					className="primary commit-btn"
 					disabled={max < 1}
 					onClick={() =>
 						dispatch({ t: 'commit', energy: Math.min(energy, max), discards: disc, extra, diff, dodgeRole, buffers, boosts, swap, responses: resp, versatile: vers })
@@ -865,7 +949,7 @@ function Travel({ g, dispatch }: { g: Game; dispatch: Dispatch }) {
 								{card(l.to).pivotal && <small className="pivotal"> ✦ pivotal</small>}
 							</span>
 							<span className="btns">
-								<button disabled={l.path === 'river'} title={l.path === 'river' ? 'You cannot travel along river paths until a card lets you.' : ''} onClick={() => dispatch({ t: 'travel', to: l.to, camp: false })}>
+								<button className="go-btn" disabled={l.path === 'river'} title={l.path === 'river' ? 'You cannot travel along river paths until a card lets you.' : ''} onClick={() => dispatch({ t: 'travel', to: l.to, camp: false })}>
 									Travel
 								</button>
 								<button disabled={l.path === 'river'} onClick={() => dispatch({ t: 'travel', to: l.to, camp: true })}>
@@ -876,7 +960,7 @@ function Travel({ g, dispatch }: { g: Game; dispatch: Dispatch }) {
 					))}
 				</ul>
 			)}
-			<button className="primary" onClick={() => dispatch({ t: 'stay' })}>
+			<button className="primary stay-btn" onClick={() => dispatch({ t: 'stay' })}>
 				Stay here
 			</button>
 			<details>
@@ -1063,6 +1147,8 @@ function Viewer({
 // ------------------------------------------------------------------ menu, search
 
 function Menu({
+	coachOn,
+	setCoachOn,
 	g,
 	me,
 	manual,
@@ -1074,6 +1160,8 @@ function Menu({
 	onExit,
 	hooks,
 }: {
+	coachOn: boolean
+	setCoachOn: (b: boolean) => void
 	g: Game
 	me: number
 	manual: boolean
@@ -1101,6 +1189,9 @@ function Menu({
 					<button onClick={openSearch}>Search for a card…</button>
 					<button onClick={onExit}>Save &amp; back to campaign</button>
 				</div>
+				<label className="check">
+					<input type="checkbox" checked={coachOn} onChange={(e) => setCoachOn(e.target.checked)} /> Coach (explains each step, makes a good move glow)
+				</label>
 				<label className="check">
 					<input type="checkbox" checked={manual} onChange={(e) => setManual(e.target.checked)} /> Show card tools open (manual fixes)
 				</label>

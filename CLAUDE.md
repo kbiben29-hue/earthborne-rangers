@@ -40,6 +40,9 @@ npm run data    # scripts/build-game-data.mjs → src/data/game.json
 - `src/campaign/campaign.ts` — campaign tracker, Ranger builder rules, `finishDay()`, localStorage.
 - `src/ui/` — `Board.tsx` (Holodeck-style table: felt, Ranger mats with piles, fanned hand with green glow on playable cards, click or drag to play, tap a card for its action bubble, right-click / "Look closer" to inspect; prompts float in `.tray`), `motion.ts` (cards fly between piles and zones, keyed by `data-uid` / `data-anchor`), `Screens.tsx` (home, new
   campaign, builder, campaign tracker, deck editor), `Card.tsx`, `styles.css`.
+- `src/ui/coach.ts` — tutorial coach: `INTRO` pages, `coachFor()` (step text + a suggested move from a
+  simple heuristic, shown as gold glow on act buttons / cards / hand), `eventNote()` one-off notes. The
+  tutorial is a throwaway campaign (`tutorial: true`, fixed seed) started from Home.
 
 ## Hard rules
 
@@ -56,5 +59,5 @@ npm run data    # scripts/build-game-data.mjs → src/data/game.json
    Nature's Abundance, Afforded by Nature, Moment of Desperation; path cards: Whispering Fields, Mount
    Nim, Elders' deck swaps, Dace, Evergreen Hall / Hearty Brew, Spire deck, Biscuit Basket.
 2. Campaign tracker weather schedule per day (from the printed tracker) and day-30 handling.
-3. Tutorial (like Argaia/Holodeck), online play with a friend (PeerJS, like Afterlife).
+3. Online play with a friend (PeerJS, like Afterlife).
 4. Legacy of the Ancestors / Spire in Bloom / Shadow of the Storm content (data is already there).
