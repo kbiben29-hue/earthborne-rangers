@@ -1,0 +1,25 @@
+name: Rules reference (dev only)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/reference.yml']
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download rules pages for the developer (kept as a short-lived run artifact, never committed)
+        run: |
+          mkdir ref && cd ref
+          for p in earthborne-rangers/rulebook earthborne-rangers/faq earthborne-rangers-stewards-of-the-valley/rulebook earthborne-rangers-legacy-of-the-ancestors/rulebook; do
+            curl -sL -A "Mozilla/5.0" "https://rulespal.com/$p" -o "$(echo $p | tr / _).html" || true
+          done
+          curl -sL -A "Mozilla/5.0" "https://frostedgames.de/wp-content/uploads/2023/04/EBR001_Rulebook_DE_3_2023_WEB.pdf" -o rulebook-de.pdf || true
+          ls -la
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reference
+          path: ref
+          retention-days: 2
