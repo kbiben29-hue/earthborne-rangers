@@ -1,0 +1,23 @@
+{
+	"source": "https://github.com/zzorba/rangers-card-data (RangersDB, https://rangersdb.com)",
+	"source_commit": "3e7840275c57fe600dee807bb9e92f1f02cde2c3",
+	"updated": "2026-11-24T07:36:22.335Z",
+	"cards": 265,
+	"by_pack": {
+		"core": 140,
+		"loa": 29,
+		"sotv": 81,
+		"sib": 5,
+		"sos": 5,
+		"itm": 5
+	},
+	"by_type": {
+		"moment": 71,
+		"attribute": 29,
+		"gear": 86,
+		"attachment": 39,
+		"being": 21,
+		"role": 15,
+		"feature": 4
+	}
+}

@@ -1,0 +1,37 @@
+[
+	{
+		"id": "core",
+		"name": "Core set",
+		"position": 1
+	},
+	{
+		"id": "loa",
+		"name": "Legacy of the Ancestors",
+		"short_name": "LOA",
+		"position": 2
+	},
+	{
+		"id": "sotv",
+		"name": "Stewards of the Valley",
+		"short_name": "SOV",
+		"position": 3
+	},
+	{
+		"id": "sib",
+		"name": "Spire in Bloom",
+		"short_name": "SIB",
+		"position": 4
+	},
+	{
+		"id": "sos",
+		"name": "Shadow of the Storm",
+		"short_name": "SOS",
+		"position": 5
+	},
+	{
+		"id": "itm",
+		"name": "Into the Maw",
+		"short_name": "ITM",
+		"position": 6
+	}
+]
