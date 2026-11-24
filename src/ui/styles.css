@@ -1513,10 +1513,13 @@ details summary {
 	bottom: calc(var(--cw) * 1.6 + 60px);
 	width: min(380px, calc(100vw - 24px));
 	max-height: calc(100dvh - var(--cw) * 1.6 - 120px);
-	overflow: auto;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	-webkit-overflow-scrolling: touch;
+	touch-action: pan-y;
 	z-index: 40;
 	color: var(--ink);
-	pointer-events: none;
+	border-radius: 14px;
 }
 .tray > * {
 	pointer-events: auto;
@@ -1629,7 +1632,7 @@ details summary {
 		right: 8px;
 		width: auto;
 		bottom: calc(var(--cw) * 1.45 + 70px);
-		max-height: 55dvh;
+		max-height: calc(100dvh - var(--cw) * 1.45 - 130px);
 	}
 	.hcard {
 		width: calc(var(--cw) * 1.15);
@@ -1646,16 +1649,12 @@ details summary {
 
 /* ---------------- tutorial coach */
 .coach-panel {
-	position: fixed;
-	left: 12px;
-	top: 56px;
-	width: min(340px, calc(100vw - 24px));
+	margin-bottom: 8px;
 	background: var(--paper);
 	color: var(--ink);
 	border: 2px solid var(--gold);
 	border-radius: 14px;
 	padding: 10px 12px;
-	z-index: 42;
 	box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5);
 	animation: flipin 0.35s ease-out;
 }
@@ -1706,6 +1705,9 @@ details summary {
 	background: rgba(10, 18, 14, 0.7);
 }
 .intro-card {
+	max-height: calc(100dvh - 24px);
+	overflow-y: auto;
+	overscroll-behavior: contain;
 	background: var(--paper);
 	color: var(--ink);
 	width: min(560px, 92vw);
@@ -1728,13 +1730,4 @@ details summary {
 	border: 2px solid var(--gold);
 	margin-top: 10px;
 }
-@media (max-width: 760px) {
-	.coach-panel {
-		top: 52px;
-		left: 8px;
-		right: 8px;
-		width: auto;
-		max-height: 26dvh;
-		overflow: auto;
-	}
-}
+

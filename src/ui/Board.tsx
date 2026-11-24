@@ -387,40 +387,6 @@ export function Board({
 				</div>
 			)}
 
-			{coachOn && intro < 0 && (step || note) && (
-				<div className={`coach-panel ${coachMin ? 'min' : ''}`}>
-					{coachMin ? (
-						<button className="coach-pill" onClick={() => setCoachMin(false)}>
-							🧭 Coach
-						</button>
-					) : (
-						<>
-							<div className="coach-head">
-								<b>🧭 {note ? note.title : step!.title}</b>
-								<span>
-									<button className="ghost" title="Make smaller" onClick={() => setCoachMin(true)}>
-										–
-									</button>
-									<button className="ghost" title="Turn the coach off" onClick={() => setCoachOn(false)}>
-										×
-									</button>
-								</span>
-							</div>
-							<p>{note ? note.body : step!.body}</p>
-							{note && (
-								<button
-									className="primary"
-									onClick={() => {
-										setNote(null)
-									}}
-								>
-									Got it
-								</button>
-							)}
-						</>
-					)}
-				</div>
-			)}
 			{coachOn && intro >= 0 && (
 				<div className="drawer intro" onClick={() => {}}>
 					<div className="intro-card">
@@ -445,6 +411,40 @@ export function Board({
 			)}
 
 			<div className="tray">
+				{coachOn && intro < 0 && (step || note) && (
+					<div className={`coach-panel ${coachMin ? 'min' : ''}`}>
+						{coachMin ? (
+							<button className="coach-pill" onClick={() => setCoachMin(false)}>
+								🧭 Coach
+							</button>
+						) : (
+							<>
+								<div className="coach-head">
+									<b>🧭 {note ? note.title : step!.title}</b>
+									<span>
+										<button className="ghost" title="Make smaller" onClick={() => setCoachMin(true)}>
+											–
+										</button>
+										<button className="ghost" title="Turn the coach off" onClick={() => setCoachOn(false)}>
+											×
+										</button>
+									</span>
+								</div>
+								<p>{note ? note.body : step!.body}</p>
+								{note && (
+									<button
+										className="primary"
+										onClick={() => {
+											setNote(null)
+										}}
+									>
+										Got it
+									</button>
+								)}
+							</>
+						)}
+					</div>
+				)}
 				<LastTest g={g} />
 				{head && !(choosing && choosing.max === 1) && (
 					<div className={coachOn && hint.buttons?.length ? `coached ${hint.buttons.map((b) => `c-${b}`).join(' ')}` : ''}>
