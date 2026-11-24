@@ -1,5 +1,6 @@
 import type { Aspect } from '../data/data'
-import type { Action, Clause, Sym } from './text'
+import type { Effect, Step } from './dsl'
+import type { Sym } from './text'
 
 /** Where a card in play sits. */
 export type Zone = 'surroundings' | 'along' | 'reach' | 'player' | 'attached'
@@ -43,14 +44,41 @@ export interface Ranger {
 	deckList: string[]
 }
 
-export interface ResolveItem {
-	/** Card the text comes from (null = game rule). */
-	src: number | null
+/** An effect being carried out (card text the engine runs step by step). */
+export interface Job {
 	title: string
-	clause: Clause
-	/** Actions already applied for the player. */
-	auto: boolean
-	done: boolean[]
+	eff: Effect
+	src: number | null
+	ranger: number
+	effort: number
+	/** The card the test interacted with. */
+	target: number | null
+	/** Cards bound by the condition ("that predator", "it"). */
+	that: number[] | null
+	stage: 'cond' | 'pre' | 'steps'
+	i: number
+	/** Answers to choices, by "stage:index". */
+	picks: Record<string, number[]>
+	/** Answer to an "ask" condition. */
+	asked?: boolean
+	/** Fully internal job (end of test, new round…). */
+	sys?: 'finishTest' | 'newRound' | 'endTurn'
+	challenge?: number
+	/** An instruction before ⏩ couldn't be done. */
+	failed?: boolean
+	/** Amount used by the last "add" step ("an equal amount"). */
+	lastAmt?: number
+}
+export interface LastTest {
+	name: string
+	ranger: number
+	effort: number
+	base: number
+	mod: number
+	diff: number
+	success: boolean
+	challenge: number
+	symbol: Sym
 }
 
 export type Prompt =
@@ -67,16 +95,10 @@ export type Prompt =
 			diff: number
 			fatigued: number
 	  }
-	| {
-			kind: 'resolve'
-			title: string
-			ranger: number
-			effort: number
-			items: ResolveItem[]
-			/** For tests: what happened (shown at the top). */
-			result?: { effort: number; diff: number; success: boolean; challenge: number; mod: number; base: number; symbol: Sym }
-			after?: 'test' | 'play' | 'refresh' | 'none'
-	  }
+	| { kind: 'choose'; title: string; text: string; options: number[]; min: number; max: number; key: string; ranger: number }
+	| { kind: 'ask'; title: string; text: string; ranger: number; yes?: string; no?: string }
+	| { kind: 'manual'; title: string; text: string; ranger: number }
+	| { kind: 'aspect'; title: string; text: string; ranger: number; options: Aspect[]; key: string }
 	| { kind: 'guide'; entry: string; why: string }
 	| { kind: 'scout'; ranger: number; deck: 'path' | 'ranger'; cards: string[]; drawAfter?: number }
 	| { kind: 'equip'; ranger: number }
@@ -114,15 +136,40 @@ export interface Game {
 	rewards: string[]
 	/** Rangers that suffered a third injury today (each adds a Lingering Injury). */
 	lingering: number[]
+	/** Effects being carried out, first one runs. */
+	jobs: Job[]
+	lastTest: LastTest | null
+	/** Cards dodged / at presence 0 during the current test. */
+	dodge?: number[]
+	zeroPresence?: number[]
+	fatiguedThisTest?: number
+	/** Card that last got progress during the current test. */
+	progressTo?: number | null
+	/** Extra path cards the lead Ranger draws next round. */
+	extraPath?: number
 }
 
 export type Intent =
 	| { t: 'keep'; ranger: number; mulligan?: number[]; setup?: string }
 	| { t: 'test'; ranger: number; src: number | null; test: number | string; target?: number | null; useRole?: boolean }
-	| { t: 'commit'; energy: number; discards: number[]; extra: number; diff?: number }
+	| {
+			t: 'commit'
+			energy: number
+			discards: number[]
+			extra: number
+			diff?: number
+			dodgeRole?: boolean
+			buffers?: number
+			boosts?: number[]
+			swap?: boolean
+			responses?: number[]
+			versatile?: number[]
+	  }
 	| { t: 'cancelTest' }
-	| { t: 'act'; item: number; action: number; target?: number | null; ranger?: number }
-	| { t: 'resolved' }
+	| { t: 'choose'; uids: number[] }
+	| { t: 'answer'; yes: boolean }
+	| { t: 'manualDone' }
+	| { t: 'aspect'; a: Aspect }
 	| { t: 'guideRead' }
 	| { t: 'scouted'; top: string[]; bottom: string[] }
 	| { t: 'play'; ranger: number; hand: number; target?: number | null; x?: number; useRole?: boolean }
@@ -155,4 +202,4 @@ export type ManualOp =
 	| { op: 'ready'; uid: number }
 	| { op: 'note'; text: string }
 
-export type { Action }
+export type { Step }

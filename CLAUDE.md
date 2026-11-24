@@ -22,14 +22,21 @@ npm run data    # scripts/build-game-data.mjs → src/data/game.json
 - `scripts/build-game-data.mjs` — compacts the card db: thresholds (`{n, per}`, `{ranger}`, `{x}`),
   keywords, icons, map links (`links: [{to, path}]`), prebuilt Rangers, copies per card.
 - `src/data/data.ts` — typed access, `setCards(pack, set)`, `TERRAINS`, image base URL.
-- `src/engine/text.ts` — card text parser: tests (`[AWA] + [reason]: Name [2]`, `(use N token)`,
-  success / "If you fail" / "whether you succeed or fail"), challenge lines, Clear, Refresh, Start of Day,
-  Arrival Setup, keywords. `clause()` turns a sentence list into `Action`s; `complete` = all understood,
-  `lead` = understood leading sentences, `pre` = instructions before ⏩ that gate the rest.
+- `src/engine/text.ts` — splits a card's text into parts: keywords, tests (success / "If you fail" /
+  "whether you succeed or fail", `(use N token)`), challenge lines, Clear, Refresh, Start of Day, Arrival
+  Setup (Lead / Next / Each Ranger), "When this enters play", Exhaust/Response abilities, "Choose one:".
+- `src/engine/dsl.ts` — reads one effect into `Effect = { cond, pre, steps }`: conditions (`exists` with
+  filters like "an active predator", fatigue, zones, tokens…; unknown ones become a yes/no `ask`), refs
+  (this / that / the location / a X (choose) / each X / highest presence / named card / host…) and steps
+  (add/remove tokens, exhaust, move, fatigue, injury, soothe, search, attach, energy, either…). Anything
+  not understood becomes a `manual` step.
+- `src/engine/scripts.ts` — `REWRITE`: plain-sentence rewrites of card parts the reader can't handle
+  (same meaning), keyed `id+side:part`; `BY_CHALLENGE` arrivals. Coverage check: count `manual` steps.
 - `src/engine/engine.ts` — the rules (one day): `newDay()`, pure `apply(state, intent)` / `tryApply()`.
-  Prompts live in `g.queue` (mulligan, test, resolve, guide, scout, equip, travel, dayOver); the head is
-  what the UI shows. `autoOrItem()` does understood, choice-free effects at once and leaves the rest as
-  buttons (`act` intent) plus manual tools (`manual` intent).
+  Prompts live in `g.queue` (mulligan, test, choose, ask, aspect, manual, guide, scout, equip, travel,
+  dayOver); effects run as jobs in `g.jobs` (`runJobs`), stopping only for a prompt. `testOptions()` lists
+  what can be added to a test (role/response dodges, greaves, gear boosts, Memlev poles, responses,
+  Versatile); `iconsFor()` handles Vigilant-style attributes.
 - `src/campaign/campaign.ts` — campaign tracker, Ranger builder rules, `finishDay()`, localStorage.
 - `src/ui/` — `Board.tsx` (table, prompts, card viewer, menu, search), `Screens.tsx` (home, new
   campaign, builder, campaign tracker, deck editor), `Card.tsx`, `styles.css`.
@@ -44,7 +51,10 @@ npm run data    # scripts/build-game-data.mjs → src/data/game.json
 
 ## Next steps
 
-1. Script more card effects (conditions like "If there is an active predator"), most-used first.
+1. Ranger cards still partly by hand: Reverb Locket, Perfect Recall, Functional Replica, Paratrepsis
+   Whistle, Calming Presence's cancel, Root Snare, Harmonize, Sky Whip (moment tests), Local Fare,
+   Nature's Abundance, Afforded by Nature, Moment of Desperation; path cards: Whispering Fields, Mount
+   Nim, Elders' deck swaps, Dace, Evergreen Hall / Hearty Brew, Spire deck, Biscuit Basket.
 2. Campaign tracker weather schedule per day (from the printed tracker) and day-30 handling.
 3. Tutorial (like Argaia/Holodeck), online play with a friend (PeerJS, like Afterlife).
 4. Legacy of the Ancestors / Spire in Bloom / Shadow of the Storm content (data is already there).

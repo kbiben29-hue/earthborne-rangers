@@ -374,8 +374,10 @@ export function CampaignView({ c, update, startDay, resume, back }: { c: Campaig
 				</div>
 			)}
 
-			<div className="panel">
-				<h3>Missions</h3>
+			<details className="panel fold">
+				<summary>
+					<h3>Missions</h3>
+				</summary>
 				<ul className="missions">
 					{c.missions.map((m, k) => (
 						<li key={m.id + k}>
@@ -415,10 +417,12 @@ export function CampaignView({ c, update, startDay, resume, back }: { c: Campaig
 						Add
 					</button>
 				</div>
-			</div>
+			</details>
 
-			<div className="panel">
-				<h3>Rewards unlocked</h3>
+			<details className="panel fold">
+				<summary>
+					<h3>Rewards unlocked</h3>
+				</summary>
 				<div className="hand mini">
 					{c.rewards.map((id) => (
 						<HandCard key={id} id={id} />
@@ -445,10 +449,12 @@ export function CampaignView({ c, update, startDay, resume, back }: { c: Campaig
 						Unlock
 					</button>
 				</div>
-			</div>
+			</details>
 
-			<div className="panel">
-				<h3>Rangers</h3>
+			<details className="panel fold">
+				<summary>
+					<h3>Rangers</h3>
+				</summary>
 				{c.rangers.map((r, k) => (
 					<div key={k} className="ranger-row">
 						<div>
@@ -461,10 +467,12 @@ export function CampaignView({ c, update, startDay, resume, back }: { c: Campaig
 						{swap === k && <DeckEditor c={c} r={k} update={update} />}
 					</div>
 				))}
-			</div>
+			</details>
 
-			<div className="panel">
-				<h3>Notable events</h3>
+			<details className="panel fold">
+				<summary>
+					<h3>Notable events</h3>
+				</summary>
 				<ul className="events">
 					{c.events.map((e, k) => (
 						<li key={k}>
@@ -484,10 +492,12 @@ export function CampaignView({ c, update, startDay, resume, back }: { c: Campaig
 						Record
 					</button>
 				</div>
-			</div>
+			</details>
 
-			<div className="panel">
-				<h3>Guide entries &amp; history</h3>
+			<details className="panel fold">
+				<summary>
+					<h3>Guide entries &amp; history</h3>
+				</summary>
 				<div className="row-input">
 					<input placeholder="Entry you were sent to (to remember where you are)" value={entry} onChange={(e) => setEntry(e.target.value)} />
 					<button
@@ -512,7 +522,7 @@ export function CampaignView({ c, update, startDay, resume, back }: { c: Campaig
 					<summary>Map of the Valley</summary>
 					<MapView />
 				</details>
-			</div>
+			</details>
 		</div>
 	)
 }

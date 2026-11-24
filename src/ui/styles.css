@@ -28,7 +28,7 @@ TYPE   Josefin Sans for titles (like the card titles), Source Sans 3 for reading
 	--r3: #b5832a;
 	--radius: 10px;
 	--shadow: 0 1px 0 rgba(0, 0, 0, 0.05), 0 6px 18px -10px rgba(40, 30, 10, 0.45);
-	color-scheme: light;
+	color-scheme: only light;
 }
 * {
 	box-sizing: border-box;
@@ -976,8 +976,22 @@ details summary {
 	padding-left: 18px;
 }
 
+.mobile-only {
+	display: none;
+}
 /* ------------------------------------------------ phones */
 @media (max-width: 760px) {
+	.mobile-only {
+		display: block;
+	}
+	.mobile-only .last-test {
+		margin: 0 0 6px;
+		padding: 4px 8px;
+		grid-template-columns: 36px 1fr;
+	}
+	.mobile-only .last-test img {
+		width: 36px;
+	}
 	.board {
 		grid-template-columns: 1fr;
 		grid-template-areas:
@@ -1035,4 +1049,73 @@ details summary {
 	.tracker .days {
 		grid-template-columns: repeat(10, 1fr);
 	}
+}
+
+.options {
+	list-style: none;
+	padding: 0;
+	display: grid;
+	gap: 6px;
+}
+.options button {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	width: 100%;
+	text-align: left;
+}
+.options img {
+	width: 44px;
+	border-radius: 4px;
+}
+.last-test {
+	display: grid;
+	grid-template-columns: 54px 1fr;
+	gap: 10px;
+	align-items: center;
+	border-radius: 10px;
+	padding: 6px 10px;
+	margin-bottom: 10px;
+	font-size: 0.9rem;
+}
+.last-test img {
+	width: 54px;
+	border-radius: 5px;
+}
+.last-test span {
+	display: block;
+	color: var(--muted);
+}
+.last-test.ok {
+	background: #dcebdc;
+}
+.last-test.bad {
+	background: #f3dcd5;
+}
+
+.checks {
+	display: grid;
+	gap: 2px;
+	margin: 6px 0;
+	font-size: 0.92rem;
+}
+.checks .check {
+	margin: 2px 0;
+}
+.fold > summary {
+	list-style: none;
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+}
+.fold > summary::after {
+	content: '▸';
+	color: var(--muted);
+}
+.fold[open] > summary::after {
+	content: '▾';
+}
+.fold > summary h3 {
+	margin: 0;
 }

@@ -1,12 +1,20 @@
 // The Earthborne Rangers rules engine: one day of play. Pure: apply() clones the state.
 // Rules source: the Earthborne Rangers rulebook (core set). Card text overrides rules.
+// Card text is read by text.ts / dsl.ts into effects; runJobs() carries them out and only
+// stops to ask when there is a real choice.
 import { ASPECTS, card, CARDS, CHALLENGE, setCards, TERRAINS, type Aspect, type CardDef } from '../data/data'
+import type { Amount, Cond, Effect, Filter, Ref, Step } from './dsl'
+import { effect as effectOf } from './dsl'
 import { shuffle } from './rng'
-import { amountValue, clause as clauseOf, COMMON_TESTS, parse, type Action, type Clause, type Parsed, type Sym } from './text'
-import type { Game, Inst, Intent, ManualOp, Prompt, Ranger, ResolveItem } from './types'
+import { scriptFor } from './scripts'
+import { COMMON_TESTS, parse, type Parsed, type Sym } from './text'
+import type { Game, Inst, Intent, Job, ManualOp, Ranger } from './types'
 
 // ---------------------------------------------------------------- card helpers
 
+function flat(id: string) {
+	return (card(id).text || '').replace(/<f>[\s\S]*?<\/f>/g, '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ')
+}
 const parsedCache = new Map<string, Parsed>()
 export function parsedOf(id: string, side: 'A' | 'B' = 'A'): Parsed {
 	const k = id + side
@@ -14,6 +22,7 @@ export function parsedOf(id: string, side: 'A' | 'B' = 'A'): Parsed {
 	if (!p) {
 		const c = card(id)
 		p = parse(side === 'B' && c.B ? c.B.text : c.text)
+		scriptFor(id, side, p)
 		parsedCache.set(k, p)
 	}
 	return p
@@ -22,13 +31,27 @@ export const P = (g: Game, uid: number) => parsedOf(g.inst[uid].id, g.inst[uid].
 export const def = (g: Game, uid: number): CardDef => card(g.inst[uid].id)
 export function nameOf(g: Game, uid: number): string {
 	const i = g.inst[uid]
+	if (!i) return 'a card'
 	const c = card(i.id)
 	return i.side === 'B' && c.B ? c.B.name : c.name
 }
-export function traitsOf(g: Game, uid: number): string {
+export function traitsOf(g: Game, uid: number): string[] {
 	const i = g.inst[uid]
 	const c = card(i.id)
-	return ((i.side === 'B' && c.B?.traits) || c.traits || '').toLowerCase()
+	let tr = ((i.side === 'B' && c.B?.traits) || c.traits || '')
+		.toLowerCase()
+		.split('/')
+		.map((t) => t.trim())
+		.filter(Boolean)
+	for (const a of attachments(g, uid)) {
+		if (a.faceDown) continue
+		const t = flat(a.id)
+		const gain = t.match(/The attached card gains the (\w+) trait/i)
+		if (gain) tr = [...tr, gain[1].toLowerCase()]
+		const lose = t.match(/Attached card loses the (\w+) trait/i)
+		if (lose) tr = tr.filter((x) => x !== lose[1].toLowerCase())
+	}
+	return tr
 }
 export function typeOf(g: Game, uid: number): string {
 	const i = g.inst[uid]
@@ -37,11 +60,14 @@ export function typeOf(g: Game, uid: number): string {
 }
 export function presence(g: Game, uid: number): number {
 	const i = g.inst[uid]
+	if (!i) return 0
+	if (g.zeroPresence?.includes(uid)) return 0
 	const c = card(i.id)
 	const p = i.side === 'B' && c.B?.presence != null ? c.B.presence : c.presence
-	if (typeof p === 'number') return p
-	if (p === 'X' && /number of \[harm\]/.test(c.text || '')) return i.harm
-	return 0
+	let n = typeof p === 'number' ? p : p === 'X' && /number of \[harm\]/.test(c.text || '') ? i.harm : 0
+	// Surveyed Land: "Reduce the attached feature's presence by 1 for each marker"
+	for (const a of attachments(g, uid)) if (/Reduce the attached \w+'s presence by 1 for each/i.test(flat(a.id))) n -= a.tokens
+	return Math.max(0, n)
 }
 export function keywords(g: Game, uid: number): string[] {
 	return P(g, uid).keywords.map((k) => k.split(' ')[0])
@@ -65,7 +91,7 @@ export function log(g: Game, s: string) {
 	g.log.push(s)
 	if (g.log.length > 400) g.log.splice(0, g.log.length - 400)
 }
-const rangerName = (g: Game, r: number) => g.rangers[r].name
+const rangerName = (g: Game, r: number) => g.rangers[r]?.name ?? 'Ranger'
 function addInst(g: Game, id: string, zone: Inst['zone'], owner: number | null, kind: Inst['kind'], side: 'A' | 'B' = 'A'): number {
 	const uid = g.next++
 	const c = card(id)
@@ -117,13 +143,13 @@ export function sufferFatigue(g: Game, r: number, n: number, why = '') {
 		return
 	}
 	R.fatigue.push(...R.deck.splice(0, n))
+	g.fatiguedThisTest = (g.fatiguedThisTest ?? 0) + n
 	log(g, `${R.name} suffers ${n} fatigue${why ? ` from ${why}` : ''}.`)
 }
 export function soothe(g: Game, r: number, n: number) {
 	const R = g.rangers[r]
 	const k = Math.min(n, R.fatigue.length)
 	if (!k) return
-	// the fatigue stack's top is the last card added
 	R.hand.push(...R.fatigue.splice(R.fatigue.length - k, k))
 	log(g, `${R.name} soothes ${k} fatigue.`)
 }
@@ -141,8 +167,10 @@ export function injure(g: Game, r: number, n = 1) {
 }
 export function heal(g: Game, r: number, n = 1) {
 	const R = g.rangers[r]
-	R.injuries = Math.max(0, R.injuries - n)
-	log(g, `${R.name} heals ${n} injur${n > 1 ? 'ies' : 'y'}.`)
+	const k = Math.min(n, R.injuries)
+	if (!k) return
+	R.injuries -= k
+	log(g, `${R.name} heals ${k} injur${k > 1 ? 'ies' : 'y'}.`)
 }
 export function drawRanger(g: Game, r: number, n = 1): boolean {
 	const R = g.rangers[r]
@@ -153,8 +181,7 @@ export function drawRanger(g: Game, r: number, n = 1): boolean {
 			return false
 		}
 		R.hand.push(c)
-		// Lingering Injury: "When you draw this card, attach it to your role."
-		if (/attach it to your role/i.test(card(c).text || '') && /When you draw this card/i.test(card(c).text || '')) {
+		if (/When you draw this card, attach it to your role/i.test(card(c).text || '')) {
 			R.hand.pop()
 			const uid = addInst(g, c, 'attached', r, 'ranger')
 			g.inst[uid].attachedTo = R.roleUid
@@ -168,6 +195,7 @@ function endDay(g: Game, reason: string, camp = false) {
 	if (g.ended) return
 	g.ended = { reason, camp }
 	g.phase = 'over'
+	g.jobs = []
 	g.queue = [{ kind: 'dayOver', reason }]
 	log(g, `The day ends: ${reason}`)
 }
@@ -186,41 +214,25 @@ function drawPathCard(g: Game, r: number, why = 'draws') {
 	const id = g.pathDeck.shift()!
 	putPathInPlay(g, id, r, why)
 }
-export function putPathInPlay(g: Game, id: string, r: number, why = 'draws', area?: 'reach' | 'along') {
+export function putPathInPlay(g: Game, id: string, r: number, why = 'draws', area?: 'reach' | 'along'): number {
 	const c = card(id)
 	const zone = area ?? c.area ?? 'along'
 	const uid = addInst(g, id, zone === 'reach' ? 'reach' : 'along', zone === 'reach' ? r : null, 'path')
 	log(g, `${rangerName(g, r)} ${why} ${c.name} (${zone === 'reach' ? 'within reach' : 'along the way'}).`)
 	const p = parsedOf(id)
 	if (p.guide) g.queue.push({ kind: 'guide', entry: p.guide, why: `${c.name} entered play` })
-	// Ambush: entering play within reach fatigues that Ranger.
 	if (zone === 'reach' && p.keywords.includes('Ambush')) sufferFatigue(g, r, presence(g, uid), `${c.name} (ambush)`)
-	// "When this … enters play, …"
-	const enters = p.other.find((l) => /when this [a-z]+ enters play/i.test(l))
-	if (enters) {
-		const text = enters.replace(/^.*?when this [a-z]+ enters play,?\s*/i, '')
-		pushResolve(g, `${c.name} enters play`, r, 0, [item(g, uid, c.name, text)], 'none')
-	}
-}
-
-function item(_g: Game, src: number | null, title: string, textOrClause: string | Clause): ResolveItem {
-	const clause: Clause = typeof textOrClause === 'string' ? clauseOf(textOrClause) : textOrClause
-	return { src, title, clause, auto: false, done: clause.actions.map(() => false) }
-}
-
-function pushResolve(g: Game, title: string, ranger: number, effort: number, items: ResolveItem[], after: 'test' | 'play' | 'refresh' | 'none', front = false) {
-	const pr: Prompt = { kind: 'resolve', title, ranger, effort, items, after }
-	if (front) g.queue.unshift(pr)
-	else g.queue.push(pr)
+	if (p.enters) addJob(g, { title: `${c.name} enters play`, eff: p.enters, src: uid, ranger: r }, 'end')
+	return uid
 }
 
 // ---------------------------------------------------------------- interacting
 
 /** Cards between Ranger r and the card they interact with (rulebook: Fatigue from Interacting). */
 export function between(g: Game, r: number, target: number | null): number[] {
-	if (target == null) return []
+	if (target == null || !g.inst[target]) return []
 	const t = g.inst[target]
-	const tz = t.attachedTo != null ? g.inst[t.attachedTo] ?? t : t
+	const tz = t.attachedTo != null ? (g.inst[t.attachedTo] ?? t) : t
 	const mine = zoneCards(g, 'reach', r).map((i) => i.uid)
 	const roleAttached = attachments(g, g.rangers[r].roleUid).map((i) => i.uid)
 	let out: number[] = []
@@ -228,9 +240,8 @@ export function between(g: Game, r: number, target: number | null): number[] {
 	else if (tz.zone === 'reach') out = mine
 	else if (tz.zone === 'along') out = mine
 	else if (tz.zone === 'surroundings') out = [...mine, ...zoneCards(g, 'along').map((i) => i.uid)]
-	else out = []
 	if (tz.zone !== 'player') out = [...out, ...roleAttached.filter((u) => u !== target)]
-	return out.filter((u) => u !== target && u !== tz.uid && !g.inst[u].exhausted && !g.inst[u].faceDown)
+	return out.filter((u) => u !== target && u !== tz.uid && !g.inst[u].exhausted && !g.inst[u].faceDown && !(g.dodge ?? []).includes(u))
 }
 export function blockedBy(g: Game, r: number, target: number | null): number | null {
 	for (const u of between(g, r, target)) if (has(g, u, 'Obstacle')) return u
@@ -251,7 +262,6 @@ function interactFatigue(g: Game, r: number, target: number | null): number {
 
 /** Active cards for challenge effects, in resolution order. */
 export function activeCards(g: Game, r: number, target: number | null): number[] {
-	const ready = (i: Inst) => !i.exhausted && !i.faceDown
 	const list: Inst[] = []
 	list.push(...g.weather.map((u) => g.inst[u]).filter(Boolean))
 	if (g.inst[g.location]) list.push(g.inst[g.location])
@@ -262,20 +272,676 @@ export function activeCards(g: Game, r: number, target: number | null): number[]
 	if (t && t.zone === 'reach' && t.owner != null && t.owner !== r) list.push(...zoneCards(g, 'reach', t.owner))
 	list.push(...attachments(g, g.rangers[r].roleUid))
 	list.push(...zoneCards(g, 'player', r))
-	// faceup attachments on those cards count too
 	const withAtt: Inst[] = []
 	for (const i of list) {
 		withAtt.push(i)
-		for (const a of attachments(g, i.uid)) if (!a.faceDown && a.kind !== 'ranger') withAtt.push(a)
+		for (const a of attachments(g, i.uid)) if (!a.faceDown && a.kind !== 'ranger' && !withAtt.includes(a)) withAtt.push(a)
 	}
-	return [...new Set(withAtt.filter((i) => ready(i) || i.kind === 'weather' || i.kind === 'mission' || i.kind === 'location').map((i) => i.uid))]
+	return [...new Set(withAtt.filter((i) => !i.faceDown && (!i.exhausted || i.kind === 'weather' || i.kind === 'mission' || i.kind === 'location')).map((i) => i.uid))]
+}
+
+// ---------------------------------------------------------------- matching cards
+
+function wordMatch(g: Game, uid: number, w: string): boolean {
+	const i = g.inst[uid]
+	const c = card(i.id)
+	const tr = traitsOf(g, uid)
+	const ty = typeOf(g, uid).toLowerCase()
+	const nm = nameOf(g, uid).toLowerCase()
+	if (w === 'card') return true
+	if (w === 'path card') return c.back === 'path'
+	if (nm.includes(w)) return true
+	const parts = w
+		.split(' ')
+		.map((x) => x.replace(/s$/, ''))
+		.filter((x) => x !== 'card')
+	return parts.every((p) => tr.some((t) => t === p || t.replace(/s$/, '') === p) || ty === p || (p === 'path' && c.back === 'path'))
+}
+export function matches(g: Game, uid: number, f: Filter, job: Pick<Job, 'src' | 'ranger' | 'target' | 'that'> | null, scope?: number[]): boolean {
+	const i = g.inst[uid]
+	if (!i || i.faceDown) return false
+	if (i.kind === 'role' || i.kind === 'weather' || i.kind === 'mission') return false
+	if (i.kind === 'location' && !(f.words ?? []).some((w) => /location/.test(w))) return false
+	if (f.notSelf && job && uid === job.src) return false
+	if (f.notThat && job?.that?.includes(uid)) return false
+	if (f.words?.length && !f.words.some((w) => wordMatch(g, uid, w))) return false
+	if (f.exhausted && !i.exhausted) return false
+	if ((f.ready || f.active) && i.exhausted) return false
+	if (f.active && scope && !scope.includes(uid)) return false
+	if (f.zone === 'reach' && i.zone !== 'reach') return false
+	if (f.zone === 'along' && i.zone !== 'along') return false
+	if (f.harm && i.harm < f.harm) return false
+	if (f.path && i.kind !== 'path') return false
+	if (f.attachedToSelf && (job?.src == null || i.attachedTo !== job.src)) return false
+	return true
+}
+function candidates(g: Game, f: Filter, job: Job): number[] {
+	const scope = f.active ? activeCards(g, job.ranger, job.target) : undefined
+	return inPlay(g)
+		.map((i) => i.uid)
+		.filter((u) => matches(g, u, f, job, scope))
+}
+
+// ---------------------------------------------------------------- running effects
+
+type NewJob = Pick<Job, 'title' | 'eff' | 'src' | 'ranger'> & Partial<Pick<Job, 'effort' | 'target' | 'that' | 'sys' | 'challenge'>>
+export function addJob(g: Game, j: NewJob, where: 'front' | 'end' = 'end') {
+	const job: Job = { effort: 0, target: null, that: null, stage: 'cond', i: 0, picks: {}, ...j }
+	if (where === 'front') g.jobs.unshift(job)
+	else g.jobs.push(job)
+}
+const SYS = (sys: Job['sys'], ranger: number, extra: Partial<Job> = {}): NewJob => ({ title: sys!, eff: { text: '', pre: [], steps: [], auto: true }, src: null, ranger, sys, ...extra })
+
+function amount(g: Game, a: Amount, job: Job, to?: number): number {
+	if ('n' in a) return a.n
+	if ('effort' in a) return Math.floor(Math.max(0, job.effort) / (a.per ?? 1)) * (a.mult ?? 1)
+	if ('presence' in a) {
+		const u = a.presence === 'self' ? job.src : job.that?.[0]
+		return u != null ? presence(g, u) : 0
+	}
+	if ('aspect' in a) return g.rangers[job.ranger].aspects[a.aspect]
+	if ('tokens' in a) return job.src != null ? (g.inst[job.src]?.tokens ?? 0) : 0
+	if ('all' in a) return to != null && g.inst[to] ? 999 : 0
+	if ('same' in a) return job.lastAmt ?? 0
+	return 0
+}
+
+function choose(g: Game, job: Job, key: string, options: number[], n: number, text: string): number[] | null {
+	if (job.picks[key]) return job.picks[key]
+	g.queue.unshift({ kind: 'choose', title: job.title, text, options, min: Math.min(n, options.length), max: Math.min(n, options.length), key, ranger: job.ranger })
+	return null
+}
+/** Cards a reference points at. Returns null when the player must choose (prompt queued). */
+function refs(g: Game, ref: Ref, job: Job, key: string, title: string): number[] | null {
+	switch (ref.r) {
+		case 'self':
+			return job.src != null && g.inst[job.src] ? [job.src] : []
+		case 'that':
+			return (job.that ?? (job.target != null ? [job.target] : [])).filter((u) => g.inst[u])
+		case 'location':
+			return [g.location]
+		case 'weather':
+			return g.weather.slice()
+		case 'role':
+			return [g.rangers[job.ranger].roleUid]
+		case 'target':
+			return job.target != null && g.inst[job.target] ? [job.target] : []
+		case 'each':
+			return candidates(g, ref.f, job)
+		case 'named': {
+			const nm = ref.name.toLowerCase()
+			if (job.src != null && g.inst[job.src] && nameOf(g, job.src).toLowerCase().includes(nm)) return [job.src]
+			return inPlay(g)
+				.filter((i) => nameOf(g, i.uid).toLowerCase().includes(nm))
+				.map((i) => i.uid)
+				.slice(0, 1)
+		}
+		case 'lastProgress':
+			return g.progressTo != null && g.inst[g.progressTo] ? [g.progressTo] : []
+		case 'host': {
+			const h = job.src != null ? g.inst[job.src]?.attachedTo : null
+			return h != null && g.inst[h] ? [h] : []
+		}
+		case 'otherRanger': {
+			const others = g.rangers.map((R, k) => (k !== job.ranger ? R.roleUid : -1)).filter((u) => u >= 0)
+			if (others.length <= 1) return others
+			return choose(g, job, key, others, 1, `${title}: which Ranger?`)
+		}
+		case 'highest':
+		case 'lowest': {
+			const c = candidates(g, ref.f, job)
+			if (!c.length) return []
+			const ps = c.map((u) => presence(g, u))
+			const best = ref.r === 'highest' ? Math.max(...ps) : Math.min(...ps)
+			const tied = c.filter((u) => presence(g, u) === best)
+			if (tied.length === 1) return tied
+			return choose(g, job, key, tied, 1, `${title} (tied for ${ref.r} presence)`)
+		}
+		case 'choose': {
+			const c = candidates(g, ref.f, job)
+			const got = c.length <= 1 ? c : choose(g, job, key, c, ref.n ?? 1, title)
+			if (got) job.that = got
+			return got
+		}
+	}
+}
+
+function evalCond(g: Game, c: Cond, job: Job): boolean | null {
+	switch (c.c) {
+		case 'exists': {
+			const found = candidates(g, c.f, job)
+			if (c.negate) return found.length === 0
+			const ok = found.length >= (c.atLeast ?? 1)
+			if (ok && c.bind) {
+				if (found.length === 1 || c.atLeast) job.that = found
+				else {
+					const p = choose(g, job, 'cond', found, 1, `${job.title}: which ${c.f.words?.join(' or ') ?? 'card'}?`)
+					if (!p) return null
+					job.that = p
+				}
+			}
+			return ok
+		}
+		case 'selfZone': {
+			const i = job.src != null ? g.inst[job.src] : null
+			const z = i ? (i.attachedTo != null ? g.inst[i.attachedTo]?.zone : i.zone) : null
+			const ok = z === c.zone
+			return c.negate ? !ok : ok
+		}
+		case 'selfTok': {
+			const i = job.src != null ? g.inst[job.src] : null
+			const v = i ? i[c.what] : 0
+			if (c.odd) return v % 2 === 1
+			return (c.min == null || v >= c.min) && (c.max == null || v <= c.max)
+		}
+		case 'youFatigue':
+			return g.rangers[job.ranger].fatigue.length >= c.min
+		case 'injured':
+			return g.rangers.some((r) => r.injuries > 0)
+		case 'tokenOnSelf': {
+			const on = g.rangers.some((r) => r.token === job.src)
+			return c.negate ? !on : on
+		}
+		case 'selfAttached': {
+			const on = job.src != null && g.inst[job.src]?.attachedTo != null
+			return c.negate ? !on : on
+		}
+		case 'and':
+			for (const x of c.all) {
+				const v = evalCond(g, x, job)
+				if (v !== true) return v
+			}
+			return true
+		case 'or':
+			for (const x of c.any) {
+				const v = evalCond(g, x, job)
+				if (v === null) return null
+				if (v) return true
+			}
+			return false
+		case 'ask': {
+			if (job.asked != null) return job.asked
+			g.queue.unshift({ kind: 'ask', title: job.title, text: c.text, ranger: job.ranger })
+			return null
+		}
+		case 'locTok': {
+			const v = g.inst[g.location]?.tokens ?? 0
+			return (c.min == null || v >= c.min) && (c.max == null || v <= c.max)
+		}
+		case 'addedProgress':
+			return g.progressTo != null
+		case 'fatiguedTest':
+			return (g.fatiguedThisTest ?? 0) > 0
+		case 'location':
+			return nameOf(g, g.location).toLowerCase() === c.name.toLowerCase()
+		case 'targetIs':
+			return job.target != null && matches(g, job.target, c.f, job)
+		case 'tokenOn': {
+			const t = g.rangers[job.ranger].token
+			return t != null && matches(g, t, c.f, job)
+		}
+	}
+}
+
+function whoseReach(g: Game, job: Job): number[] {
+	const i = job.src != null ? g.inst[job.src] : null
+	if (i?.zone === 'reach' && i.owner != null) return [i.owner]
+	return [job.ranger]
+}
+/** Match a card that isn't in play (for searches). */
+function fakeMatch(id: string, f: Filter): boolean {
+	const c = card(id)
+	if (!f.words?.length) return true
+	const tr = (c.traits ?? '').toLowerCase().split('/').map((t) => t.trim())
+	const nm = c.name.toLowerCase()
+	return f.words.some((w) => w === 'card' || nm.includes(w) || w.split(' ').every((p) => tr.some((t) => t.replace(/s$/, '') === p) || c.type.toLowerCase() === p))
+}
+
+/** Runs one step. 'wait' = a prompt was queued; 'stop' = the rest must not happen. */
+function runStep(g: Game, s: Step & { when?: Cond }, job: Job, key: string): 'ok' | 'wait' | 'stop' | 'pause' {
+	if (s.when) {
+		const v = evalCond(g, s.when, job)
+		if (v === null) return 'wait'
+		if (!v) return 'ok'
+	}
+	const r = job.ranger
+	const title = job.title
+	const each = (ref: Ref, f: (u: number) => void, what: string): 'ok' | 'wait' | 'stop' => {
+		const us = refs(g, ref, job, key, `${title}: choose ${what}`)
+		if (us === null) return 'wait'
+		if (!us.length) return ref.r === 'self' || ref.r === 'that' ? 'stop' : 'ok'
+		for (const u of us) if (g.inst[u]) f(u)
+		return 'ok'
+	}
+	switch (s.k) {
+		case 'addTok':
+			return each(
+				s.to,
+				(u) => {
+					const n = amount(g, s.amt, job, u)
+					job.lastAmt = n
+					addTokens(g, u, s.what, n)
+				},
+				s.what === 'tokens' ? 'a card' : `a card to add ${s.what} to`,
+			)
+		case 'remTok':
+			return each(
+				s.to,
+				(u) => {
+					const i = g.inst[u]
+					const want = amount(g, s.amt, job, u)
+					if (i[s.what] < want && 'n' in s.amt) job.failed = true
+					const n = Math.min(i[s.what], want)
+					i[s.what] -= n
+					if (n) log(g, `${n} ${s.what === 'tokens' ? (card(i.id).tokens?.name ?? 'token').toLowerCase() : s.what} removed from ${nameOf(g, u)}.`)
+				},
+				'a card',
+			)
+		case 'exhaust':
+		case 'ready':
+			return each(
+				s.to,
+				(u) => {
+					if (s.k === 'exhaust' && g.inst[u].exhausted && job.stage === 'pre') job.failed = true
+					g.inst[u].exhausted = s.k === 'exhaust'
+					log(g, `${nameOf(g, u)} is ${s.k === 'exhaust' ? 'exhausted' : 'readied'}.`)
+				},
+				`a card to ${s.k}`,
+			)
+		case 'discard':
+			return each(s.to, (u) => discardCard(g, u), 'a card to discard')
+		case 'flip':
+			return each(s.to, (u) => flip(g, u), 'a card to flip')
+		case 'shuffleIn':
+			return each(
+				s.to,
+				(u) => {
+					if (g.inst[u].kind !== 'path') return
+					log(g, `${nameOf(g, u)} is shuffled into the path deck.`)
+					removeInst(g, u, 'shuffle')
+				},
+				'a card',
+			)
+		case 'topOfPath':
+			return each(
+				s.to,
+				(u) => {
+					log(g, `${nameOf(g, u)} goes on top of the path deck.`)
+					removeInst(g, u, 'pathTop')
+				},
+				'a card',
+			)
+		case 'faceDown':
+			return each(s.to, (u) => (g.inst[u].faceDown = true), 'a card')
+		case 'move':
+			return each(
+				s.to,
+				(u) => {
+					const i = g.inst[u]
+					let area = s.area
+					if (area === 'sameAsThat') {
+						const t = job.that?.[0] != null ? g.inst[job.that[0]] : null
+						if (t) {
+							i.zone = t.zone
+							i.owner = t.owner
+							i.attachedTo = null
+							log(g, `${nameOf(g, u)} moves next to ${nameOf(g, t.uid)}.`)
+						}
+						return
+					}
+					if (s.ranger === 'other') {
+						const others = g.rangers.map((_, k) => k).filter((k) => k !== (i.owner ?? r))
+						if (!others.length) return
+						const pick = job.picks[key + 'r']?.[0]
+						const R = pick != null ? g.rangers.findIndex((x) => x.roleUid === pick) : others[0]
+						moveCard(g, u, 'reach', R >= 0 ? R : others[0])
+						return
+					}
+					if (!area || area === 'other') area = i.zone === 'reach' ? 'along' : 'reach'
+					moveCard(g, u, area, i.zone === 'reach' && area === 'reach' ? (i.owner ?? r) : r)
+				},
+				'a card to move',
+			)
+		case 'fatigue':
+		case 'injury':
+		case 'soothe':
+		case 'heal':
+		case 'drawRanger': {
+			let who: number[] = s.who === 'each' ? g.rangers.map((_, k) => k) : s.who === 'that' ? whoseReach(g, job) : [r]
+			if (s.who === 'onSelf') who = g.rangers.map((R, k) => (R.token != null && R.token === job.src ? k : -1)).filter((k) => k >= 0)
+			if (s.who === 'choose' && g.rangers.length > 1) {
+				const p = choose(g, job, key, g.rangers.map((R) => R.roleUid), 1, `${title}: which Ranger?`)
+				if (!p) return 'wait'
+				who = [g.rangers.findIndex((R) => R.roleUid === p[0])]
+			}
+			for (const k of who) {
+				const n = amount(g, s.amt, job)
+				if (s.k === 'fatigue') sufferFatigue(g, k, n, job.title)
+				else if (s.k === 'injury') injure(g, k, n)
+				else if (s.k === 'soothe') soothe(g, k, n)
+				else if (s.k === 'heal') heal(g, k, n)
+				else drawRanger(g, k, n)
+			}
+			return 'ok'
+		}
+		case 'drawPath':
+			for (let k = 0; k < amount(g, s.amt, job); k++) drawPathCard(g, r)
+			return 'ok'
+		case 'scoutPath': {
+			const n = amount(g, s.amt, job)
+			if (n > 0 && g.pathDeck.length) {
+				g.queue.unshift({ kind: 'scout', ranger: r, deck: 'path', cards: g.pathDeck.slice(0, n) })
+				return 'pause'
+			}
+			return 'ok'
+		}
+		case 'scoutRanger': {
+			const n = amount(g, s.amt, job)
+			if (n > 0 && g.rangers[r].deck.length) {
+				g.queue.unshift({ kind: 'scout', ranger: r, deck: 'ranger', cards: g.rangers[r].deck.slice(0, n) })
+				return 'pause'
+			}
+			return 'ok'
+		}
+		case 'scoutChallenge': {
+			const n = amount(g, s.amt, job)
+			if (!g.challenge.length) g.challenge = shuffle(g.challengeDiscard.splice(0), g.rng)
+			const top = g.challenge.slice(0, n).map((c) => CHALLENGE[c].symbol)
+			log(g, `${rangerName(g, r)} looks at the top challenge card${n > 1 ? 's' : ''}: ${top.join(', ')}.`)
+			return 'ok'
+		}
+		case 'fatiguesYou':
+			return each(
+				s.from,
+				(u) => {
+					if (!g.inst[u].exhausted) sufferFatigue(g, r, presence(g, u), nameOf(g, u))
+				},
+				'a card',
+			)
+		case 'rangerToken': {
+			if (s.to.r === 'roleToken') {
+				g.rangers[r].token = null
+				log(g, `${rangerName(g, r)}'s Ranger token returns to their role.`)
+				return 'ok'
+			}
+			return each(
+				s.to,
+				(u) => {
+					for (const k of s.each ? g.rangers.map((_, k) => k) : [r]) {
+						g.rangers[k].token = u
+						log(g, `${rangerName(g, k)} moves their Ranger token to ${nameOf(g, u)}.`)
+					}
+				},
+				'a card for your Ranger token',
+			)
+		}
+		case 'guide':
+			g.queue.unshift({ kind: 'guide', entry: s.entry, why: job.src != null && g.inst[job.src] ? nameOf(g, job.src) : job.title })
+			return 'pause'
+		case 'searchPath': {
+			const pools: string[][] = [g.pathDeck, ...(s.alsoDiscard ? [g.pathDiscard] : [])]
+			for (const pool of pools) {
+				const k = pool.findIndex((id) => fakeMatch(id, s.f))
+				if (k < 0) continue
+				const [id] = pool.splice(k, 1)
+				g.pathDeck = shuffle(g.pathDeck, g.rng)
+				if (s.then === 'discard') {
+					g.pathDiscard.push(id)
+					log(g, `${card(id).name} is found in the path deck and discarded.`)
+				} else putPathInPlay(g, id, r, 'finds')
+				return 'ok'
+			}
+			log(g, `No ${s.f.words?.join(' or ') ?? 'card'} to find.`)
+			return 'ok'
+		}
+		case 'searchSet': {
+			const set = s.set.replace(/^the /i, '')
+			const pool = [...setCards('Core', set), ...setCards('Core', `The ${set}`)]
+			const inUse = new Set([...g.pathDeck, ...g.pathDiscard, ...Object.values(g.inst).map((i) => i.id)])
+			for (let k = 0; k < (s.n ?? 1); k++) {
+				const id = pool.find((x) => fakeMatch(x, s.f) && !inUse.has(x)) ?? pool.find((x) => fakeMatch(x, s.f))
+				if (!id) {
+					log(g, `No ${s.f.words?.join(' or ')} in the ${s.set} set.`)
+					break
+				}
+				inUse.add(id)
+				if (s.then === 'shuffle') {
+					g.pathDeck = shuffle([...g.pathDeck, id], g.rng)
+					log(g, `${card(id).name} is shuffled into the path deck.`)
+				} else putPathInPlay(g, id, r, 'finds')
+			}
+			return 'ok'
+		}
+		case 'attach': {
+			const what = refs(g, s.what, job, key + 'w', `${title}: choose a card to attach`)
+			if (what === null) return 'wait'
+			const to = refs(g, s.to, job, key + 't', `${title}: attach to which card?`)
+			if (to === null) return 'wait'
+			if (!what.length || !to.length) return 'ok'
+			for (const u of what) {
+				const i = g.inst[u]
+				i.attachedTo = to[0]
+				i.zone = 'attached'
+				if (s.faceDown) {
+					i.faceDown = true
+					i.progress = 0
+					i.harm = 0
+				}
+				log(g, `${nameOf(g, u)} is attached ${s.faceDown ? 'facedown ' : ''}to ${nameOf(g, to[0])}.`)
+			}
+			return 'ok'
+		}
+		case 'exhaustRole': {
+			const who = s.who === 'each' ? g.rangers.map((_, k) => k) : [r]
+			for (const k of who) {
+				g.inst[g.rangers[k].roleUid].exhausted = true
+				log(g, `${rangerName(g, k)}'s role is exhausted.`)
+			}
+			return 'ok'
+		}
+		case 'exhaustGear': {
+			const gear = zoneCards(g, 'player', r).filter((i) => i.kind === 'ranger' && !i.exhausted)
+			if (gear.length <= s.n) {
+				for (const i of gear) i.exhausted = true
+				if (gear.length) log(g, `${gear.map((i) => nameOf(g, i.uid)).join(', ')} exhausted.`)
+				return 'ok'
+			}
+			const p = choose(g, job, key, gear.map((i) => i.uid), s.n, `${title}: exhaust ${s.n} of your gear`)
+			if (!p) return 'wait'
+			for (const u of p) g.inst[u].exhausted = true
+			return 'ok'
+		}
+		case 'discardGear': {
+			const gear = zoneCards(g, 'player', r).filter((i) => i.kind === 'ranger')
+			if (!gear.length) return 'ok'
+			const p = gear.length === 1 ? [gear[0].uid] : choose(g, job, key, gear.map((i) => i.uid), 1, `${title}: discard one of your gear`)
+			if (!p) return 'wait'
+			discardCard(g, p[0])
+			return 'ok'
+		}
+		case 'discardEnergy': {
+			const R = g.rangers[r]
+			const a = s.aspect ?? (ASPECTS.slice().sort((x, y) => R.energy[y] - R.energy[x])[0] as Aspect)
+			const n = Math.min(R.energy[a], s.n)
+			R.energy[a] -= n
+			if (n) log(g, `${R.name} discards ${n} ${a} energy.`)
+			else if (s.aspect) job.failed = true
+			return 'ok'
+		}
+		case 'flipIf': {
+			const i = job.src != null ? g.inst[job.src] : null
+			if (i && (s.min == null || i.tokens >= s.min) && (s.max == null || i.tokens <= s.max)) flip(g, i.uid)
+			return 'ok'
+		}
+		case 'endDay':
+			endDay(g, s.reason)
+			return 'stop'
+		case 'byChallenge': {
+			if (!job.picks[key]) {
+				const c = drawChallenge(g)
+				const sym = CHALLENGE[c].symbol
+				log(g, `Challenge card drawn: ${SYM_LABEL[sym]} ${sym}.`)
+				job.picks[key] = [c]
+				const steps = s[sym]
+				// run the branch as its own effect right after this one
+				g.jobs.splice(1, 0, { ...job, title: `${job.title} (${sym})`, eff: { text: '', pre: [], steps, auto: true }, stage: 'pre', i: 0, picks: {} })
+			}
+			return 'ok'
+		}
+		case 'either': {
+			const ans = job.picks[key]
+			if (!ans) {
+				job.asked = undefined
+				g.queue.unshift({ kind: 'ask', title: job.title, text: 'Choose one:', ranger: r, yes: s.la, no: s.lb })
+				job.picks[key] = [-1]
+				return 'wait'
+			}
+			const steps = job.asked === false ? s.b : s.a
+			job.asked = undefined
+			g.jobs.splice(1, 0, { ...job, title: job.title, eff: { text: '', pre: [], steps, auto: true }, stage: 'pre', i: 0, picks: {} })
+			return 'ok'
+		}
+		case 'energy': {
+			const R = g.rangers[r]
+			let a = s.aspect
+			if (!a) {
+				const opts = ASPECTS.filter((x) => s.gain || R.energy[x] > 0)
+				if (!opts.length) {
+					job.failed = true
+					return 'stop'
+				}
+				const pick = job.picks[key]
+				if (!pick) {
+					g.queue.unshift({ kind: 'aspect', title: job.title, text: s.gain ? `Gain ${s.n} energy of which type?` : `Spend ${s.n} energy of which type?`, ranger: r, options: opts, key })
+					return 'wait'
+				}
+				a = ASPECTS[pick[0]]
+			}
+			if (s.gain) {
+				R.energy[a] += s.n
+				log(g, `${R.name} gains ${s.n} ${a}.`)
+			} else {
+				if (R.energy[a] < s.n) {
+					job.failed = true
+					return 'stop'
+				}
+				R.energy[a] -= s.n
+				log(g, `${R.name} spends ${s.n} ${a}.`)
+			}
+			return 'ok'
+		}
+		case 'fromDiscard': {
+			const R = g.rangers[r]
+			const k = R.discard.lastIndexOf(s.id)
+			if (k >= 0) {
+				R.discard.splice(k, 1)
+				R.hand.push(s.id)
+				log(g, `${card(s.id).name} returns to ${R.name}'s hand.`)
+			}
+			return 'ok'
+		}
+		case 'moveTok': {
+			const from = refs(g, s.from, job, key + 'f', `${title}: move ${s.what} from which card?`)
+			if (from === null) return 'wait'
+			const to = refs(g, s.to, job, key + 't', `${title}: move it to which card?`)
+			if (to === null) return 'wait'
+			if (!from.length || !to.length) return 'ok'
+			const n = g.inst[from[0]][s.what]
+			g.inst[from[0]][s.what] = 0
+			g.inst[to[0]][s.what] += n
+			log(g, `${n} ${s.what} moved from ${nameOf(g, from[0])} to ${nameOf(g, to[0])}.`)
+			return 'ok'
+		}
+		case 'extraPath':
+			g.extraPath = (g.extraPath ?? 0) + s.n
+			return 'ok'
+		case 'endRound':
+			for (const R of g.rangers) R.rested = true
+			return 'ok'
+		case 'manual':
+			if (!s.text.trim()) return 'ok'
+			g.queue.unshift({ kind: 'manual', title: job.title, text: s.text, ranger: r })
+			return 'pause'
+	}
+}
+
+/** Carries out queued effects until one needs the player. */
+function runJobs(g: Game) {
+	let guard = 0
+	while (g.jobs.length && !g.queue.length && !g.ended && guard++ < 500) {
+		const job = g.jobs[0]
+		if (job.sys) {
+			g.jobs.shift()
+			sysJob(g, job)
+			checkClears(g)
+			continue
+		}
+		if (job.stage === 'cond') {
+			if (job.eff.cond) {
+				const v = evalCond(g, job.eff.cond, job)
+				if (v === null) return
+				if (!v) {
+					g.jobs.shift()
+					continue
+				}
+			}
+			job.stage = 'pre'
+			job.i = 0
+		}
+		const list = job.stage === 'pre' ? job.eff.pre : job.eff.steps
+		if (job.i >= list.length) {
+			if (job.stage === 'pre') {
+				if (job.failed) {
+					log(g, `${job.title}: that couldn't be done, so nothing more happens.`)
+					g.jobs.shift()
+					continue
+				}
+				job.stage = 'steps'
+				job.i = 0
+				continue
+			}
+			g.jobs.shift()
+			checkClears(g)
+			continue
+		}
+		const key = `${job.stage}:${job.i}`
+		const res = runStep(g, list[job.i], job, key)
+		if (res === 'wait') return
+		if (res === 'pause') {
+			job.i++
+			return
+		}
+		if (res === 'stop' && job.stage === 'pre') job.failed = true
+		job.i++
+	}
+}
+
+function sysJob(g: Game, job: Job) {
+	switch (job.sys) {
+		case 'finishTest':
+			if (job.challenge != null && CHALLENGE[job.challenge].reshuffle) {
+				g.challenge = shuffle([...g.challenge, ...g.challengeDiscard.splice(0)], g.rng)
+				log(g, 'The challenge deck is reshuffled.')
+			}
+			g.dodge = []
+			g.zeroPresence = []
+			g.fatiguedThisTest = 0
+			endTurn(g, job.ranger)
+			return
+		case 'endTurn':
+			endTurn(g, job.ranger)
+			return
+		case 'newRound':
+			newRound(g)
+			return
+	}
 }
 
 // ---------------------------------------------------------------- turn order
 
 export function canTakeTurn(g: Game, r: number): string | null {
 	if (g.phase !== 'turns') return 'It is not the Ranger turns phase.'
-	if (g.queue.length) return 'Finish the current step first.'
+	if (g.queue.length || g.jobs.length) return 'Finish the current step first.'
 	if (g.rangers[r].rested) return `${rangerName(g, r)} has rested this round.`
 	const others = g.rangers.filter((x, k) => k !== r && !x.rested).length
 	if (g.lastTurn === r && others > 0 && !g.inst[g.rangers[r].roleUid].exhausted) return 'role'
@@ -309,7 +975,6 @@ export interface TestChoice {
 	diff: number | 'X'
 	needsTarget: string | null
 }
-/** Every test Ranger r can perform right now (common tests + tests on cards in play). */
 export function availableTests(g: Game, r: number): TestChoice[] {
 	const out: TestChoice[] = COMMON_TESTS.map((t) => ({ src: null, test: t.key, name: t.name, aspect: t.aspect, approach: t.approach, diff: t.diff, needsTarget: t.targets || null }))
 	for (const i of inPlay(g)) {
@@ -320,6 +985,7 @@ export function availableTests(g: Game, r: number): TestChoice[] {
 	return out
 }
 export function commonTargetOk(g: Game, key: string, uid: number): boolean {
+	if (!g.inst[uid]) return false
 	const ty = typeOf(g, uid)
 	if (key === 'traverse') return ty === 'Feature' || ty === 'Location'
 	if (key === 'connect') return ty === 'Being' && !has(g, uid, 'Disconnected')
@@ -342,9 +1008,7 @@ function startTest(g: Game, it: Extract<Intent, { t: 'test' }>): string | null {
 		const t = P(g, it.src).tests[it.test]
 		if (!t) return 'Unknown test.'
 		;({ aspect, approach, name, diff } = t)
-		const srcInst = g.inst[it.src]
-		// Tests on your own gear interact with what they affect; on path cards, with that card.
-		if (target == null && srcInst.zone !== 'player') target = it.src
+		if (target == null && g.inst[it.src].zone !== 'player') target = it.src
 		if (t.use && g.inst[it.src].tokens < t.use) return `${nameOf(g, it.src)} has no tokens left to use.`
 	}
 	if (g.rangers[r].energy[aspect] < 1) return `${rangerName(g, r)} needs at least 1 ${aspect} energy.`
@@ -354,17 +1018,77 @@ function startTest(g: Game, it: Extract<Intent, { t: 'test' }>): string | null {
 	if (err) return err
 	if (typeof it.test === 'number' && it.src != null) {
 		const t = P(g, it.src).tests[it.test]
-		if (t.use) g.inst[it.src].tokens -= t.use
+		if (t.use) {
+			g.inst[it.src].tokens -= t.use
+			usedToken(g, it.src, r)
+		}
 	}
 	const x = target != null ? Math.max(1, presence(g, target)) : 1
 	log(g, `${rangerName(g, r)} performs ${name}${target != null ? ` on ${nameOf(g, target)}` : ''}.`)
-	const fatigued = interactFatigue(g, r, target)
-	if (g.ended) return null
-	g.queue.unshift({ kind: 'test', ranger: r, src: it.src, test: it.test, target, aspect, approach, name, diff: diff === 'X' ? x : diff, fatigued })
+	g.fatiguedThisTest = 0
+	g.lastTest = null
+	g.progressTo = null
+	g.queue.unshift({ kind: 'test', ranger: r, src: it.src, test: it.test, target, aspect, approach, name, diff: diff === 'X' ? x : diff, fatigued: 0 })
 	return null
 }
 
-/** Effort from other Rangers' tokens on the card you interact with. */
+// ---------------------------------------------------------------- things you can add to a test
+
+export interface TestOptions {
+	inWay: number[]
+	fatigue: number
+	dodgeRole: number | null
+	greaves: { uid: number; max: number } | null
+	boosts: { uid: number; label: string }[]
+	swap: { uid: number; to: Aspect } | null
+	responses: { hand: number; id: string; label: string; cost: number; aspect: Aspect; kind: 'dodge' | 'success'; n?: number; text?: string }[]
+	versatile: number[]
+}
+/** Approach icons a hand card gives this test (attributes like Vigilant count your energy). */
+export function iconsFor(g: Game, r: number, id: string, approach: string, pool?: Record<Aspect, number>): number {
+	const c = card(id)
+	const m = flat(id).match(/The number of \[(conflict|reason|exploration|connection)\] on this attribute is equal to the number of \[(AWA|FIT|FOC|SPI)\] in your energy pool/i)
+	if (m && m[1] === approach) return (pool ?? g.rangers[r].energy)[m[2] as Aspect]
+	return c.icons?.[approach as 'conflict'] ?? 0
+}
+export function testOptions(g: Game, pr: Extract<import('./types').Prompt, { kind: 'test' }>): TestOptions {
+	const r = pr.ranger
+	const R = g.rangers[r]
+	const inWay = between(g, r, pr.target)
+	const fatigue = inWay.filter((u) => !has(g, u, 'Friendly')).reduce((n, u) => n + presence(g, u), 0)
+	const role = g.inst[R.roleUid]
+	const dodgeRole = !role.exhausted && /When you perform a test, dodge 1 card/i.test(flat(role.id)) ? role.uid : null
+	let greaves: TestOptions['greaves'] = null
+	const boosts: TestOptions['boosts'] = []
+	let swap: TestOptions['swap'] = null
+	for (const i of zoneCards(g, 'player')) {
+		const t = flat(i.id)
+		if (i.owner === r && /Use X \w+: When you perform a test, suffer X fewer fatigue/i.test(t) && i.tokens > 0) greaves = { uid: i.uid, max: i.tokens }
+		const b = t.match(/Exhaust \(use 1 (\w+)\): When a Ranger performs an? (\w+) test, commit 1 effort/i)
+		if (b && !i.exhausted && i.tokens > 0 && b[2].toLowerCase() === pr.name.toLowerCase()) boosts.push({ uid: i.uid, label: `${nameOf(g, i.uid)} (+1, use 1 ${b[1]})` })
+		const sw = t.match(/When you perform a (\w+) test, use \[?(AWA|FIT|FOC|SPI)\]? instead of \[?(AWA|FIT|FOC|SPI)\]?/i)
+		if (sw && i.owner === r && !i.exhausted && (!/use 1/.test(t) || i.tokens > 0) && sw[1].toLowerCase() === pr.name.toLowerCase() && sw[3] === pr.aspect) swap = { uid: i.uid, to: sw[2] as Aspect }
+	}
+	const responses: TestOptions['responses'] = []
+	R.hand.forEach((id, h) => {
+		const c = card(id)
+		if (c.type !== 'Moment') return
+		const t = flat(id)
+		const cost = typeof c.cost === 'number' ? c.cost : 0
+		const aspect = c.aspect ?? 'AWA'
+		const d = t.match(/Response: When you (\w+), dodge up to (\d+) cards/i)
+		if (d && d[1].toLowerCase() === pr.name.toLowerCase()) responses.push({ hand: h, id, label: `${c.name}: dodge up to ${d[2]} cards`, cost, aspect, kind: 'dodge', n: Number(d[2]) })
+		const sc = t.match(/Response: After you succeed at an? (\w+) test, (.+?)( This is in addition.*)?$/i)
+		if (sc && sc[1].toLowerCase() === pr.name.toLowerCase()) responses.push({ hand: h, id, label: `${c.name} if you succeed: ${sc[2]}`, cost, aspect, kind: 'success', text: sc[2] })
+	})
+	const versatile: number[] = []
+	R.hand.forEach((id, h) => {
+		const m = flat(id).match(/Before you commit this attribute, you may suffer 1 fatigue\. If you do, this attribute gains ((?:\[\w+\] ?)+)/i)
+		if (m && m[1].includes(pr.approach)) versatile.push(h)
+	})
+	return { inWay, fatigue, dodgeRole, greaves, boosts, swap, responses, versatile }
+}
+
 export function tokenEffort(g: Game, r: number, target: number | null): number {
 	if (target == null) return 0
 	return g.rangers.filter((x, k) => k !== r && x.token === target).length
@@ -381,105 +1105,127 @@ function commit(g: Game, it: Extract<Intent, { t: 'commit' }>): string | null {
 	if (pr?.kind !== 'test') return 'No test to commit to.'
 	const r = pr.ranger
 	const R = g.rangers[r]
-	if (it.energy < 1 || it.energy > R.energy[pr.aspect]) return `Commit between 1 and ${R.energy[pr.aspect]} ${pr.aspect} energy.`
-	R.energy[pr.aspect] -= it.energy
+	const opt = testOptions(g, pr)
+	const aspect: Aspect = it.swap && opt.swap ? opt.swap.to : pr.aspect
+	if (it.energy < 1 || it.energy > R.energy[aspect]) return `Commit between 1 and ${R.energy[aspect]} ${aspect} energy.`
+	if (it.swap && opt.swap) {
+		const sw = g.inst[opt.swap.uid]
+		sw.exhausted = true
+		if (/use 1/.test(flat(sw.id))) sw.tokens--
+		log(g, `${R.name} uses ${nameOf(g, sw.uid)}: ${aspect} instead of ${pr.aspect}.`)
+	}
+	// 1. Dodging and fatigue from cards in the way
+	const dodge: number[] = []
+	const byPresence = opt.inWay.filter((u) => !has(g, u, 'Friendly')).sort((a, b) => presence(g, b) - presence(g, a))
+	const responses = [...new Set(it.responses ?? [])].map((h) => opt.responses.find((x) => x.hand === h)).filter((x): x is TestOptions['responses'][number] => !!x)
+	const used: number[] = []
+	for (const rs of responses.filter((x) => x.kind === 'dodge')) {
+		if (R.energy[rs.aspect] < rs.cost) continue
+		R.energy[rs.aspect] -= rs.cost
+		used.push(rs.hand)
+		dodge.push(...byPresence.filter((u) => !dodge.includes(u)).slice(0, rs.n ?? 1))
+		log(g, `${R.name} plays ${card(rs.id).name} and dodges.`)
+	}
+	if (it.dodgeRole && opt.dodgeRole != null) {
+		g.inst[opt.dodgeRole].exhausted = true
+		dodge.push(...byPresence.filter((u) => !dodge.includes(u)).slice(0, 1))
+		log(g, `${R.name} exhausts ${nameOf(g, opt.dodgeRole)} to dodge.`)
+	}
+	g.dodge = dodge
+	const buffers = Math.min(it.buffers ?? 0, opt.greaves?.max ?? 0)
+	if (buffers && opt.greaves) g.inst[opt.greaves.uid].tokens -= buffers
+	for (const u of between(g, r, pr.target)) {
+		if (has(g, u, 'Friendly')) continue
+		const n = Math.max(0, presence(g, u) - buffers)
+		if (n) sufferFatigue(g, r, n, nameOf(g, u))
+		if (g.ended) return null
+	}
+	// 2. Effort
+	R.energy[aspect] -= it.energy
 	let icons = 0
-	const idx = [...new Set(it.discards)].sort((a, b) => b - a)
+	const idx = [...new Set([...it.discards, ...used])].sort((a, b) => b - a)
 	const committed: string[] = []
+	const attrs: string[] = []
 	for (const h of idx) {
 		const id = R.hand[h]
 		if (!id) continue
-		icons += card(id).icons?.[pr.approach as keyof CardDef['icons'] & string] ?? 0
+		const isResp = used.includes(h)
+		if (!isResp) {
+			let n = iconsFor(g, r, id, pr.approach)
+			if ((it.versatile ?? []).includes(h) && opt.versatile.includes(h)) {
+				n += 1
+				sufferFatigue(g, r, 1, card(id).name)
+			}
+			icons += n
+			committed.push(card(id).name)
+			if (card(id).type === 'Attribute') attrs.push(id)
+		}
 		R.hand.splice(h, 1)
 		R.discard.push(id)
-		committed.push(card(id).name)
+	}
+	let boost = 0
+	for (const u of it.boosts ?? []) {
+		const b = opt.boosts.find((x) => x.uid === u)
+		if (!b) continue
+		g.inst[u].exhausted = true
+		g.inst[u].tokens--
+		usedToken(g, u, r)
+		boost++
+		log(g, `${nameOf(g, u)} commits 1 effort.`)
 	}
 	const tok = tokenEffort(g, r, pr.target)
-	const base = it.energy + icons + tok + (it.extra || 0)
+	const base = it.energy + icons + tok + boost + (it.extra || 0)
 	const ci = drawChallenge(g)
 	const ch = CHALLENGE[ci]
-	const mod = ch[pr.aspect]
+	const mod = ch[aspect]
 	const effort = Math.max(0, base + mod)
 	const diff = it.diff ?? pr.diff
 	const success = effort >= diff
 	g.queue.shift()
+	g.lastTest = { name: pr.name, ranger: r, effort, base, mod, diff, success, challenge: ci, symbol: ch.symbol }
 	log(
 		g,
 		`${R.name} commits ${it.energy} energy${icons ? ` + ${icons} icon${icons > 1 ? 's' : ''} (${committed.join(', ')})` : ''}${tok ? ` + ${tok} from Ranger tokens` : ''}${it.extra ? ` + ${it.extra}` : ''}; challenge ${mod >= 0 ? '+' : ''}${mod} ${ch.symbol} → effort ${effort} vs ${diff}: ${success ? 'success' : 'failure'}.`,
 	)
-
-	const items: ResolveItem[] = []
-	const presenceOfTarget = pr.target != null && g.inst[pr.target] ? presence(g, pr.target) : 0
-	// Success / failure effects
-	if (typeof pr.test === 'string') {
-		common(g, pr.test, r, pr.target, effort, success)
-		const ct = COMMON_TESTS.find((x) => x.key === pr.test)!
-		const what =
-			pr.test === 'traverse'
-				? success
-					? `${effort} progress added to ${pr.target != null && g.inst[pr.target] ? nameOf(g, pr.target) : 'the card'}.`
-					: `${rangerName(g, r)} suffers 1 injury.`
-				: pr.test === 'connect'
-					? success
-						? `${effort} progress added to ${pr.target != null && g.inst[pr.target] ? nameOf(g, pr.target) : 'the being'}.`
-						: 'Nothing happens.'
-					: pr.test === 'avoid'
-						? success
-							? `${pr.target != null && g.inst[pr.target] ? nameOf(g, pr.target) : 'The being'} is exhausted.`
-							: 'Nothing happens.'
-						: success
-							? `Scout ${effort} Ranger cards, then draw 1.`
-							: 'Nothing happens.'
-		items.push({ src: null, title: `${ct.name} — ${success ? 'success' : 'failure'}`, clause: { text: what, actions: [], complete: true }, auto: true, done: [] })
-	} else if (pr.src != null && g.inst[pr.src]) {
+	const base0 = { ranger: r, effort, target: pr.target }
+	// Responses played "after you succeed"
+	if (success)
+		for (const rs of responses.filter((x) => x.kind === 'success')) {
+			const k = R.hand.indexOf(rs.id)
+			if (k < 0 || R.energy[rs.aspect] < rs.cost) continue
+			R.energy[rs.aspect] -= rs.cost
+			R.hand.splice(k, 1)
+			R.discard.push(rs.id)
+			log(g, `${R.name} plays ${card(rs.id).name}.`)
+			addJob(g, { title: card(rs.id).name, eff: effectOf(rs.text!), src: null, ...base0 })
+		}
+	// Attributes that do something after a success
+	if (success)
+		for (const id of attrs) {
+			const t = flat(id)
+			if (/you may suffer 1 fatigue to add it back into your hand/i.test(t))
+				addJob(g, { title: card(id).name, eff: { text: '', pre: [], steps: [{ k: 'either', a: [{ k: 'fatigue', amt: { n: 1 } }, { k: 'fromDiscard', id }], b: [], la: `Suffer 1 fatigue: ${card(id).name} back to your hand`, lb: 'Leave it' }], auto: true }, src: null, ...base0 })
+			const gn = t.match(/gain 1 \[?(AWA|FIT|FOC|SPI)\]?\.?$/i)
+			if (gn) addJob(g, { title: card(id).name, eff: { text: '', pre: [], steps: [{ k: 'energy', n: 1, aspect: gn[1] as Aspect, gain: true }], auto: true }, src: null, ...base0 })
+			if (/you may suffer 1 fatigue to gain 1 energy of any type/i.test(t))
+				addJob(g, { title: card(id).name, eff: { text: '', pre: [], steps: [{ k: 'either', a: [{ k: 'fatigue', amt: { n: 1 } }, { k: 'energy', n: 1, gain: true }], b: [], la: 'Suffer 1 fatigue: gain 1 energy', lb: 'No thanks' }], auto: true }, src: null, ...base0 })
+		}
+	if (typeof pr.test === 'string') common(g, pr.test, r, pr.target, effort, success)
+	else if (pr.src != null && g.inst[pr.src]) {
 		const t = P(g, pr.src).tests[pr.test]
 		const name = `${nameOf(g, pr.src)}: ${t.name}`
-		if (success) items.push(autoOrItem(g, pr.src, `${name} — success`, t.effect, r, effort, presenceOfTarget))
-		else if (t.fail) items.push(autoOrItem(g, pr.src, `${name} — failure`, t.fail, r, effort, presenceOfTarget))
-		if (t.always) items.push(autoOrItem(g, pr.src, name, t.always, r, effort, presenceOfTarget))
+		if (success) addJob(g, { title: name, eff: t.success, src: pr.src, ...base0 })
+		else if (t.fail) addJob(g, { title: `${name} (failed)`, eff: t.fail, src: pr.src, ...base0 })
+		if (t.always) addJob(g, { title: name, eff: t.always, src: pr.src, ...base0 })
 	}
-	// Challenge effects on active cards
-	if (!g.ended) {
-		for (const u of activeCards(g, r, pr.target)) {
-			const cl = P(g, u).challenge[ch.symbol]
-			if (!cl) continue
-			items.push(autoOrItem(g, u, `${nameOf(g, u)} ${SYM_LABEL[ch.symbol]}`, cl, r, effort, presence(g, u)))
-		}
+	for (const u of activeCards(g, r, pr.target)) {
+		const e = P(g, u).challenge[ch.symbol]
+		if (e) addJob(g, { title: `${nameOf(g, u)} ${SYM_LABEL[ch.symbol]}`, eff: e, src: u, ...base0 })
 	}
-	const result = { effort, diff, success, challenge: ci, mod, base, symbol: ch.symbol }
-	// Fully automatic items stay in the list (marked done) so the player sees what happened.
-	g.queue.unshift({ kind: 'resolve', title: pr.name, ranger: r, effort, items, result, after: 'test' })
+	addJob(g, SYS('finishTest', r, { challenge: ci }))
 	return null
 }
-export const SYM_LABEL: Record<Sym, string> = { sun: '☀ sun', mountain: '⛰ mountain', crest: '⚜ crest' }
-
-/** Applies a clause automatically when the game understood all of it and it needs no choice. */
-function autoOrItem(g: Game, src: number, title: string, cl: Clause, r: number, effort: number, pres: number): ResolveItem {
-	const it: ResolveItem = { src, title, clause: cl, auto: false, done: cl.actions.map(() => false) }
-	const deterministic = cl.actions.every((a) => !('to' in a) || a.to === 'self' || a.to === 'location' || a.to === 'role')
-	if (cl.complete && cl.actions.length && deterministic) {
-		for (let k = 0; k < cl.actions.length; k++) {
-			const a = cl.actions[k]
-			// "Discard 1 rain from this card. ⏩ …": only go on if there was rain to discard.
-			if (cl.pre && k < cl.pre && a.kind === 'tokens' && !a.add && src != null && g.inst[src] && g.inst[src].tokens < amountValue(a.amount, effort, pres)) {
-				log(g, `${nameOf(g, src)}: nothing to discard, so the rest doesn't happen.`)
-				break
-			}
-			doAction(g, a, src, r, effort, pres, null)
-			it.done[k] = true
-		}
-		it.auto = true
-	} else if (cl.lead) {
-		// Do the plain sentences at the start; leave the rest to the player.
-		for (let k = 0; k < cl.lead; k++) {
-			const a = cl.actions[k]
-			if ('to' in a && a.to !== 'self' && a.to !== 'location' && a.to !== 'role') break
-			doAction(g, a, src, r, effort, pres, null)
-			it.done[k] = true
-		}
-	}
-	return it
-}
+export const SYM_LABEL: Record<Sym, string> = { sun: '☀', mountain: '⛰', crest: '⚜' }
 
 function common(g: Game, key: string, r: number, target: number | null, effort: number, success: boolean) {
 	if (key === 'traverse') {
@@ -501,141 +1247,14 @@ function common(g: Game, key: string, r: number, target: number | null, effort: 
 	}
 }
 
-function addTokens(g: Game, uid: number, what: 'progress' | 'harm', n: number) {
+function addTokens(g: Game, uid: number, what: 'progress' | 'harm' | 'tokens', n: number) {
 	const i = g.inst[uid]
 	if (!i || n <= 0) return
-	// "You can add a maximum of 1[progress] per test to this feature."
 	if (what === 'progress' && /maximum of 1\[progress\] per test/i.test(card(i.id).text || '')) n = Math.min(n, 1)
 	i[what] += n
-	log(g, `${n} ${what} added to ${nameOf(g, uid)}.`)
-}
-
-/** Does one understood action. `target` is the card the player picked for "choose" actions. */
-export function doAction(g: Game, a: Action, src: number | null, r: number, effort: number, pres: number, target: number | null, who?: number) {
-	const amt = (x: { amount: Parameters<typeof amountValue>[0] }) => amountValue(x.amount, effort, pres)
-	const self = src
-	const rr = who ?? r
-	switch (a.kind) {
-		case 'progress':
-		case 'harm': {
-			const to = a.to === 'location' ? g.location : a.to === 'self' ? self : target
-			if (to != null) addTokens(g, to, a.kind, amt(a))
-			break
-		}
-		case 'removeProgress':
-		case 'removeHarm': {
-			const to = a.to === 'location' ? g.location : self
-			if (to != null && g.inst[to]) {
-				const k = a.kind === 'removeProgress' ? 'progress' : 'harm'
-				g.inst[to][k] = Math.max(0, g.inst[to][k] - amt(a))
-			}
-			break
-		}
-		case 'exhaust':
-		case 'ready': {
-			const to = a.to === 'role' ? g.rangers[rr].roleUid : a.to === 'self' ? self : target
-			if (to != null && g.inst[to]) {
-				g.inst[to].exhausted = a.kind === 'exhaust'
-				log(g, `${nameOf(g, to)} is ${a.kind === 'exhaust' ? 'exhausted' : 'readied'}.`)
-			}
-			break
-		}
-		case 'discard': {
-			const to = a.to === 'self' ? self : target
-			if (to != null && g.inst[to]) discardCard(g, to)
-			break
-		}
-		case 'flip': {
-			const to = a.to === 'self' ? self : target
-			if (to != null && g.inst[to]) flip(g, to)
-			break
-		}
-		case 'move': {
-			const to = a.to === 'self' ? self : target
-			if (to != null && g.inst[to]) moveCard(g, to, a.area ?? (g.inst[to].zone === 'reach' ? 'along' : 'reach'), rr)
-			break
-		}
-		case 'fatigue':
-			if (a.who === 'each') g.rangers.forEach((_, k) => sufferFatigue(g, k, amt(a)))
-			else sufferFatigue(g, rr, amt(a))
-			break
-		case 'injury':
-			if (a.who === 'each') g.rangers.forEach((_, k) => injure(g, k, amt(a)))
-			else injure(g, rr, amt(a))
-			break
-		case 'soothe':
-			soothe(g, rr, amt(a))
-			break
-		case 'heal':
-			heal(g, rr, amt(a))
-			break
-		case 'drawRanger':
-			drawRanger(g, rr, amt(a))
-			break
-		case 'drawPath':
-			for (let k = 0; k < amt(a); k++) drawPathCard(g, rr)
-			break
-		case 'scoutPath': {
-			const n = amt(a)
-			if (n > 0) g.queue.splice(1, 0, { kind: 'scout', ranger: rr, deck: 'path', cards: g.pathDeck.slice(0, n) })
-			break
-		}
-		case 'scoutRanger': {
-			const n = amt(a)
-			if (n > 0) g.queue.splice(1, 0, { kind: 'scout', ranger: rr, deck: 'ranger', cards: g.rangers[rr].deck.slice(0, n) })
-			break
-		}
-		case 'selfFatigues':
-			if (self != null && g.inst[self] && !g.inst[self].exhausted) sufferFatigue(g, rr, presence(g, self), nameOf(g, self))
-			break
-		case 'tokens':
-			if (self != null && g.inst[self]) g.inst[self].tokens = Math.max(0, g.inst[self].tokens + (a.add ? 1 : -1) * amt(a))
-			break
-		case 'rangerToken':
-			g.rangers[rr].token = a.to === 'self' ? self : null
-			log(g, `${rangerName(g, rr)} moves their Ranger token${a.to === 'self' && self != null ? ` to ${nameOf(g, self)}` : ' to their role'}.`)
-			break
-		case 'guide':
-			g.queue.splice(1, 0, { kind: 'guide', entry: a.entry, why: src != null && g.inst[src] ? nameOf(g, src) : 'card effect' })
-			break
-		case 'searchSet': {
-			const pool = setCards('Core', a.set.replace(/^the /i, 'The ')).concat(setCards('Core', a.set))
-			const want = a.name.toLowerCase().replace(/s$/, '')
-			const id = pool.find((x) => card(x).name.toLowerCase().includes(want)) ?? pool.find((x) => (card(x).traits ?? '').toLowerCase().includes(want))
-			if (!id) {
-				log(g, `No ${a.name} found in the ${a.set} set.`)
-				break
-			}
-			if (a.then === 'shuffle') {
-				g.pathDeck = shuffle([...g.pathDeck, id], g.rng)
-				log(g, `${card(id).name} is shuffled into the path deck.`)
-			} else putPathInPlay(g, id, rr, 'finds')
-			break
-		}
-		case 'flipIf': {
-			const i = self != null ? g.inst[self] : null
-			if (i && (a.min == null || i.tokens >= a.min) && (a.max == null || i.tokens <= a.max)) flip(g, i.uid)
-			break
-		}
-		case 'searchPath': {
-			const want = a.what.toLowerCase().replace(/s$/, '')
-			const k = g.pathDeck.findIndex((id) => {
-				const c = card(id)
-				return (c.traits ?? '').toLowerCase().includes(want) || c.type.toLowerCase() === want || c.name.toLowerCase().includes(want)
-			})
-			if (k < 0) {
-				log(g, `No ${a.what} in the path deck.`)
-				break
-			}
-			const [id] = g.pathDeck.splice(k, 1)
-			g.pathDeck = shuffle(g.pathDeck, g.rng)
-			if (a.then === 'discard') {
-				g.pathDiscard.push(id)
-				log(g, `${card(id).name} is found in the path deck and discarded.`)
-			} else putPathInPlay(g, id, rr, 'finds')
-			break
-		}
-	}
+	if (what === 'progress') g.progressTo = uid
+	const label = what === 'tokens' ? (card(i.id).tokens?.name ?? 'token').toLowerCase() : what
+	log(g, `${n} ${label} added to ${nameOf(g, uid)}.`)
 }
 
 // ---------------------------------------------------------------- moving cards
@@ -643,10 +1262,7 @@ export function doAction(g: Game, a: Action, src: number | null, r: number, effo
 function discardCard(g: Game, uid: number) {
 	const i = g.inst[uid]
 	if (!i) return
-	if (i.kind === 'mission' || i.kind === 'weather' || i.kind === 'location' || i.kind === 'role') {
-		log(g, `${nameOf(g, uid)} stays in the surroundings.`)
-		return
-	}
+	if (i.kind === 'mission' || i.kind === 'weather' || i.kind === 'location' || i.kind === 'role') return
 	log(g, `${nameOf(g, uid)} is discarded.`)
 	removeInst(g, uid, 'discard')
 }
@@ -668,11 +1284,10 @@ function moveCard(g: Game, uid: number, zone: 'along' | 'reach' | 'surroundings'
 
 // ---------------------------------------------------------------- clearing
 
-/** Cards whose progress / harm / Ranger tokens reached their threshold. */
 function checkClears(g: Game) {
 	if (g.ended) return
 	for (const i of Object.values(g.inst)) {
-		if (i.faceDown || i.kind === 'location' || i.kind === 'mission' || i.kind === 'weather' || i.kind === 'role') continue
+		if (!g.inst[i.uid] || i.faceDown || i.kind === 'location' || i.kind === 'mission' || i.kind === 'weather' || i.kind === 'role') continue
 		const pt = threshold(g, i.uid, 'prog')
 		const ht = threshold(g, i.uid, 'harm')
 		let how: 'progress' | 'harm' | 'ranger' | null = null
@@ -685,11 +1300,7 @@ function checkClears(g: Game) {
 		const name = nameOf(g, i.uid)
 		log(g, `${name} clears (${how}).`)
 		const r = g.acting ?? g.lead
-		if (eff) {
-			const it = item(g, null, `${name} clears`, eff.effect)
-			g.queue.push({ kind: 'resolve', title: `${name} clears`, ranger: r, effort: 0, items: [it], after: 'none' })
-			for (const a of eff.effect.actions) if (a.kind === 'guide') it.done[eff.effect.actions.indexOf(a)] = false
-		}
+		if (eff) addJob(g, { title: `${name} clears`, eff: eff.effect, src: null, ranger: r }, 'front')
 		removeInst(g, i.uid, 'discard')
 	}
 }
@@ -703,6 +1314,7 @@ export function costOf(id: string): number | 'X' {
 export function equipUsed(g: Game, r: number) {
 	return zoneCards(g, 'player', r).reduce((s, i) => s + (card(i.id).equip ?? 0), 0)
 }
+export const isResponse = (id: string) => /^\s*(<b>)?Response:/i.test(card(id).text || '')
 
 function play(g: Game, it: Extract<Intent, { t: 'play' }>): string | null {
 	const r = it.ranger
@@ -711,7 +1323,8 @@ function play(g: Game, it: Extract<Intent, { t: 'play' }>): string | null {
 	if (!id) return 'No such card.'
 	const c = card(id)
 	if (c.type === 'Attribute') return 'Attributes can only be committed to tests.'
-	const isManifest = (c.kw ?? []).includes('Manifestation') || /\bManifestation\b/.test(c.text?.split('\n')[0] ?? '')
+	const first = (c.text?.split('\n')[0] ?? '').replace(/<[^>]+>/g, '')
+	const isManifest = /\bManifestation\b/.test(first)
 	let conduit: Inst | undefined
 	if (isManifest) {
 		conduit = zoneCards(g, 'player', r).find((i) => /\bConduit\b/.test(card(i.id).text?.split('\n')[0] ?? '') && i.tokens > 0)
@@ -720,14 +1333,12 @@ function play(g: Game, it: Extract<Intent, { t: 'play' }>): string | null {
 	const cost = costOf(id) === 'X' ? (it.x ?? 0) : (costOf(id) as number)
 	const aspect = c.aspect ?? 'AWA'
 	if (R.energy[aspect] < cost) return `${c.name} costs ${cost} ${aspect} energy.`
-	if (c.type === 'Attachment' && it.target == null) return 'Choose the card to attach it to.'
-	// Response moments can be played on other Rangers' turns; everything else takes a turn.
-	const isResponse = /^\s*(<b>)?Response:/i.test(c.text || '')
-	if (!isResponse || g.phase === 'turns') {
-		if (!(isResponse && g.acting != null)) {
-			const err = beginTurn(g, r, it.useRole)
-			if (err && !isResponse) return err
-		}
+	const seek = flat(id).match(/^Search the path deck and discard for an? (\w+) and put (?:it|them) into play with this \w+ attached/i)
+	if (c.type === 'Attachment' && it.target == null && !seek) return 'Choose the card to attach it to.'
+	const response = isResponse(id)
+	if (!response) {
+		const err = beginTurn(g, r, it.useRole)
+		if (err) return err
 	}
 	R.energy[aspect] -= cost
 	if (conduit) conduit.tokens--
@@ -735,67 +1346,88 @@ function play(g: Game, it: Extract<Intent, { t: 'play' }>): string | null {
 	log(g, `${R.name} plays ${c.name}${cost ? ` (${cost} ${aspect})` : ''}.`)
 	if (c.type === 'Moment') {
 		R.discard.push(id)
+		for (const i of zoneCards(g, 'player', r))
+			if (/After you play a moment, soothe 1 fatigue/i.test(flat(i.id))) addJob(g, { title: nameOf(g, i.uid), eff: effectOf('Soothe 1 fatigue.'), src: i.uid, ranger: r })
 		const p = parsedOf(id)
-		const lines = [...p.other, ...p.tests.map((t) => t.raw)]
-		const items = lines.map((l) => item(g, null, c.name, l.replace(/^Response:\s*[^,]*,\s*/i, '')))
-		pushResolve(g, c.name, r, 0, items, 'play', true)
+		const effs: Effect[] = p.choice
+			? [p.choice]
+			: [...p.abilities.map((a) => a.effect), ...p.other.filter((l) => !/^(Manifestation|Choose one)\b/i.test(l)).map((l) => effectOf(l.replace(/^Response:\s*When [^,]+,\s*/i, '')))]
+		for (const e of effs) addJob(g, { title: c.name, eff: e, src: null, ranger: r })
+		for (const t of p.tests) addJob(g, { title: c.name, eff: { text: t.raw, pre: [], steps: [{ k: 'manual', text: `Perform ${t.name} (${t.aspect} + ${t.approach}): ${t.success.text}` }], auto: false }, src: null, ranger: r })
 	} else if (c.type === 'Gear') {
-		// Unique: a second copy replaces the first.
-		if (/\bUnique\b/.test(c.text?.split('\n')[0] ?? '')) for (const o of zoneCards(g, 'player', r)) if (o.id === id) removeInst(g, o.uid, 'discard')
+		if (/\bUnique\b/.test(first)) for (const o of zoneCards(g, 'player', r)) if (o.id === id) removeInst(g, o.uid, 'discard')
 		const uid = addInst(g, id, 'player', r, 'ranger')
 		g.inst[uid].deckOf = r
 		if (equipUsed(g, r) > 5) g.queue.unshift({ kind: 'equip', ranger: r })
 	} else if (c.type === 'Attachment') {
-		const uid = addInst(g, id, 'attached', null, 'ranger')
-		g.inst[uid].deckOf = r
-		g.inst[uid].attachedTo = it.target!
-		g.inst[uid].owner = g.inst[it.target!]?.owner ?? null
-		log(g, `${c.name} is attached to ${nameOf(g, it.target!)}.`)
+		let host = it.target ?? null
+		if (seek) {
+			const want = seek[1].toLowerCase()
+			for (const pool of [g.pathDeck, g.pathDiscard]) {
+				const k = pool.findIndex((x) => fakeMatch(x, { words: [want] }))
+				if (k < 0) continue
+				const [pid] = pool.splice(k, 1)
+				g.pathDeck = shuffle(g.pathDeck, g.rng)
+				host = putPathInPlay(g, pid, r, 'finds')
+				break
+			}
+		}
+		if (host == null) {
+			R.discard.push(id)
+			log(g, `${c.name} finds nothing to attach to.`)
+		} else {
+			const uid = addInst(g, id, 'attached', null, 'ranger')
+			g.inst[uid].deckOf = r
+			g.inst[uid].attachedTo = host
+			g.inst[uid].owner = g.inst[host]?.owner ?? null
+			log(g, `${c.name} is attached to ${nameOf(g, host)}.`)
+			const wp = flat(id).match(/When you play this attachment, (.+?\.)/i)
+			if (wp) addJob(g, { title: c.name, eff: effectOf(wp[1]), src: uid, ranger: r })
+		}
 	} else if (c.type === 'Being' || c.type === 'Feature') {
-		if (/\bUnique\b/.test(c.text?.split('\n')[0] ?? '')) for (const o of Object.values(g.inst)) if (o.id === id && o.deckOf === r) removeInst(g, o.uid, 'discard')
+		if (/\bUnique\b/.test(first)) for (const o of Object.values(g.inst)) if (o.id === id && o.deckOf === r) removeInst(g, o.uid, 'discard')
 		const uid = addInst(g, id, 'reach', r, 'ranger')
 		g.inst[uid].deckOf = r
-	} else {
-		R.discard.push(id)
-	}
-	if (c.type !== 'Moment') endTurnIfIdle(g, r)
+	} else R.discard.push(id)
+	if (!response) addJob(g, SYS('endTurn', r))
 	return null
-}
-function endTurnIfIdle(g: Game, r: number) {
-	if (g.acting === r && !g.queue.some((p) => p.kind === 'resolve' || p.kind === 'test')) endTurn(g, r)
 }
 
 function ability(g: Game, it: Extract<Intent, { t: 'ability' }>): string | null {
 	const i = g.inst[it.uid]
 	if (!i) return 'That card is gone.'
-	const line = P(g, it.uid).other[it.line]
-	if (!line) return 'No such ability.'
-	const flat = line.replace(/<[^>]+>/g, '')
-	const ex = flat.match(/^Exhaust(?: \(use (\d+) [^)]*\))?:\s*(.*)$/i)
-	if (ex) {
+	const ab = P(g, it.uid).abilities[it.line]
+	if (!ab) return 'No such ability.'
+	if (g.queue.length && g.queue[0].kind !== 'test') return 'Finish the current step first.'
+	if (ab.kind === 'exhaust') {
 		if (i.exhausted) return `${nameOf(g, it.uid)} is already exhausted.`
-		if (ex[1] && i.tokens < Number(ex[1])) return `${nameOf(g, it.uid)} has no tokens left.`
+		if (ab.use && i.tokens < ab.use) return `${nameOf(g, it.uid)} has no tokens left.`
 		i.exhausted = true
-		if (ex[1]) i.tokens -= Number(ex[1])
+		if (ab.use) {
+			i.tokens -= ab.use
+			usedToken(g, it.uid, it.ranger)
+		}
 		log(g, `${rangerName(g, it.ranger)} exhausts ${nameOf(g, it.uid)}.`)
-		pushResolve(g, nameOf(g, it.uid), it.ranger, 0, [item(g, it.uid, nameOf(g, it.uid), ex[2])], 'none', true)
-		return null
 	}
-	pushResolve(g, nameOf(g, it.uid), it.ranger, 0, [item(g, it.uid, nameOf(g, it.uid), line)], 'none', true)
+	addJob(g, { title: nameOf(g, it.uid), eff: ab.effect, src: it.uid, ranger: it.ranger })
 	return null
+}
+
+/** "After you use a token from the attached gear, soothe 1 fatigue." */
+function usedToken(g: Game, uid: number, r: number) {
+	for (const a of attachments(g, uid)) if (/After you use a token from the attached gear, soothe 1 fatigue/i.test(flat(a.id))) soothe(g, r, 1)
 }
 
 function rest(g: Game, r: number): string | null {
 	if (g.phase !== 'turns') return 'You can only rest during Ranger turns.'
-	if (g.queue.length) return 'Finish the current step first.'
+	if (g.queue.length || g.jobs.length) return 'Finish the current step first.'
 	const R = g.rangers[r]
 	if (R.rested) return `${R.name} has already rested.`
 	R.rested = true
 	log(g, `${R.name} rests.`)
-	// Fatiguing: ready cards in your player area, within reach or along the way fatigue you.
 	for (const i of [...zoneCards(g, 'player', r), ...zoneCards(g, 'reach', r), ...zoneCards(g, 'along'), ...attachments(g, R.roleUid)]) {
 		if (i.exhausted) continue
-		const kw = P(g, i.uid).keywords.find((k) => k.startsWith('Fatiguing')) ?? (/^Fatiguing( \d+)?/.exec((card(i.id).text || '').replace(/<[^>]+>/g, ''))?.[0])
+		const kw = P(g, i.uid).keywords.find((k) => k.startsWith('Fatiguing')) ?? /^Fatiguing( \d+)?/.exec((card(i.id).text || '').replace(/<[^>]+>/g, ''))?.[0]
 		if (!kw) continue
 		const n = Number(kw.split(' ')[1] ?? presence(g, i.uid))
 		sufferFatigue(g, r, n, `${nameOf(g, i.uid)} (fatiguing)`)
@@ -820,21 +1452,22 @@ export function canTravel(g: Game): string | null {
 function startTravelPhase(g: Game) {
 	g.phase = 'travel'
 	g.acting = null
+	if (canTravel(g)) {
+		log(g, `All Rangers have rested. ${canTravel(g)}`)
+		refresh(g)
+		return
+	}
 	g.queue.push({ kind: 'travel' })
 	log(g, 'All Rangers have rested. Travel phase.')
 }
 export function buildPathDeck(g: Game, locId: string, terrain: string) {
 	const loc = card(locId)
-	const pack = 'Core'
 	const terrainSet = TERRAINS[terrain]
-	const cards: string[] = terrainSet ? setCards(pack, terrainSet) : []
+	const cards: string[] = terrainSet ? setCards('Core', terrainSet) : []
 	if (loc.pivotal) {
-		const set = loc.name.replace(/^The /, '')
-		const own = setCards(pack, loc.name).length ? setCards(pack, loc.name) : setCards(pack, set)
+		const own = setCards('Core', loc.name).length ? setCards('Core', loc.name) : setCards('Core', loc.name.replace(/^The /, ''))
 		cards.push(...own)
-	} else {
-		cards.push(...shuffle(setCards(pack, 'The Valley'), g.rng).slice(0, 3))
-	}
+	} else cards.push(...shuffle(setCards('Core', 'The Valley'), g.rng).slice(0, 3))
 	g.pathDeck = shuffle(cards, g.rng)
 	g.pathDiscard = []
 	log(g, `Path deck: ${terrainSet ?? terrain} set${loc.pivotal ? ` + ${loc.name} set` : ' + 3 Valley cards'} (${g.pathDeck.length} cards).`)
@@ -843,22 +1476,16 @@ function arrive(g: Game, locId: string) {
 	const c = card(locId)
 	const pb = parsedOf(locId, 'B')
 	if (pb.guide) g.queue.push({ kind: 'guide', entry: pb.guide, why: `Arriving at ${c.name}` })
-	const lines = pb.arrival
-	if (lines.length) {
-		const items: ResolveItem[] = []
-		let who = g.lead
-		for (const l of lines) {
-			const m = l.replace(/<[^>]+>/g, '').match(/^(Lead Ranger|Next Ranger|Each Ranger):\s*(.*)$/i)
-			if (m) {
-				if (/^Next/i.test(m[1])) who = (who + 1) % nRangers(g)
-				if (/^Next/i.test(m[1]) && who === g.lead) continue // each Ranger already resolved one
-				const title = /^Each/i.test(m[1]) ? 'Each Ranger' : rangerName(g, who)
-				const it = item(g, g.location, `Arrival: ${title}`, m[2])
-				;(it as ResolveItem & { who?: number }).who = /^Each/i.test(m[1]) ? undefined : who
-				items.push(it)
-			} else items.push(item(g, g.location, 'Arrival setup', l))
+	let who = g.lead
+	let first = true
+	for (const a of pb.arrival) {
+		if (a.who === 'next') {
+			who = (who + 1) % nRangers(g)
+			if (who === g.lead && !first) continue
 		}
-		g.queue.push({ kind: 'resolve', title: `Arrival setup: ${c.name}`, ranger: g.lead, effort: 0, items, after: 'none' })
+		if (a.who) first = false
+		const rangers = a.who === 'each' ? g.rangers.map((_, k) => k) : [a.who ? who : g.lead]
+		for (const r of rangers) addJob(g, { title: `Arrival at ${c.name}`, eff: a.effect, src: g.location, ranger: r })
 	}
 }
 function travel(g: Game, to: string, camp: boolean): string | null {
@@ -869,7 +1496,6 @@ function travel(g: Game, to: string, camp: boolean): string | null {
 	const link = from.links?.find((l) => l.to === to)
 	if (!link) return `${card(to).name} isn't connected to ${from.name}.`
 	if (link.path === 'river' && !inPlay(g).some((i) => /travel on river paths/i.test(card(i.id).text || ''))) return 'You cannot travel along river paths yet.'
-	// Clear play area (persistent cards stay).
 	for (const i of Object.values(g.inst)) {
 		if (!g.inst[i.uid]) continue
 		if (i.kind === 'role' || i.kind === 'weather' || i.kind === 'mission' || i.kind === 'location') continue
@@ -883,8 +1509,7 @@ function travel(g: Game, to: string, camp: boolean): string | null {
 		removeInst(g, i.uid, i.kind === 'path' ? 'collection' : 'discard')
 	}
 	g.queue.shift()
-	const old = g.location
-	delete g.inst[old]
+	delete g.inst[g.location]
 	g.location = addInst(g, to, 'surroundings', null, 'location')
 	g.terrain = link.path
 	log(g, `The Rangers travel along the ${TERRAINS[link.path] ?? link.path} path to ${card(to).name}.`)
@@ -913,20 +1538,15 @@ function refresh(g: Game) {
 	}
 	if (g.ended) return
 	for (const i of Object.values(g.inst)) {
-		// Biomelds etc: "Beings attached to this being do not ready."
 		if (i.attachedTo != null && /attached to this \w+ do not ready/i.test(card(g.inst[i.attachedTo]?.id ?? i.id).text || '')) continue
 		i.exhausted = false
 	}
-	// "Refresh:" effects on weather, location and missions
-	const items: ResolveItem[] = []
 	for (const u of [...g.weather, g.location, ...g.missions, ...inPlay(g).filter((i) => i.zone !== 'surroundings').map((i) => i.uid)]) {
 		if (!g.inst[u]) continue
 		const rf = P(g, u).refresh
-		if (rf) items.push(autoOrItem(g, u, `${nameOf(g, u)} (refresh)`, rf, g.lead, 0, presence(g, u)))
+		if (rf) addJob(g, { title: `${nameOf(g, u)} (refresh)`, eff: rf, src: u, ranger: g.lead })
 	}
-	const manual = items.filter((x) => !x.auto)
-	if (manual.length || items.length) g.queue.push({ kind: 'resolve', title: 'Refresh', ranger: g.lead, effort: 0, items, after: 'refresh' })
-	else newRound(g)
+	addJob(g, SYS('newRound', g.lead))
 }
 function newRound(g: Game) {
 	if (g.ended) return
@@ -935,23 +1555,28 @@ function newRound(g: Game) {
 	g.lastTurn = null
 	for (const R of g.rangers) R.rested = false
 	log(g, `— Round ${g.round}: path cards —`)
+	const extra = g.extraPath ?? 0
+	g.extraPath = 0
 	for (let k = 0; k < nRangers(g) && !g.ended; k++) drawPathCard(g, (g.lead + k) % nRangers(g))
+	for (let k = 0; k < extra && !g.ended; k++) drawPathCard(g, g.lead)
 	if (!g.ended) g.phase = 'turns'
 }
 
-/** Called whenever the queue empties: moves the day forward. */
 function settle(g: Game) {
-	checkClears(g)
-	if (g.ended) {
-		g.queue = [{ kind: 'dayOver', reason: g.ended.reason }]
-		return
-	}
-	if (g.queue.length) return
-	if (g.phase === 'setup') {
-		// setup finished (mulligans, arrival): first round starts with path cards
-		g.round = 0
-		newRound(g)
+	for (let k = 0; k < 50; k++) {
 		checkClears(g)
+		runJobs(g)
+		if (g.ended) {
+			g.queue = [{ kind: 'dayOver', reason: g.ended.reason }]
+			return
+		}
+		if (g.queue.length || g.jobs.length) return
+		if (g.phase === 'setup') {
+			g.round = 0
+			newRound(g)
+			continue
+		}
+		return
 	}
 }
 
@@ -994,6 +1619,8 @@ export function newDay(s: DaySetup): Game {
 		log: [],
 		rewards: s.rewards ?? [],
 		lingering: [],
+		jobs: [],
+		lastTest: null,
 	}
 	s.rangers.forEach((rs, r) => {
 		const aspects = card(rs.aspect).aspects!
@@ -1015,38 +1642,31 @@ export function newDay(s: DaySetup): Game {
 		}
 		g.rangers.push(R)
 		R.roleUid = addInst(g, rs.role, 'player', r, 'role')
-		// Lingering Injury cards start attached? No: they're shuffled in and attach when drawn.
 		R.hand = R.deck.splice(0, 6)
-		for (const id of R.hand.slice()) if (/When you draw this card, attach it to your role/i.test(card(id).text || '')) {
-			R.hand.splice(R.hand.indexOf(id), 1)
-			const uid = addInst(g, id, 'attached', r, 'ranger')
-			g.inst[uid].attachedTo = R.roleUid
-			g.inst[uid].deckOf = r
-			if (R.deck.length) R.hand.push(R.deck.shift()!)
-		}
+		for (const id of R.hand.slice())
+			if (/When you draw this card, attach it to your role/i.test(card(id).text || '')) {
+				R.hand.splice(R.hand.indexOf(id), 1)
+				const uid = addInst(g, id, 'attached', r, 'ranger')
+				g.inst[uid].attachedTo = R.roleUid
+				g.inst[uid].deckOf = r
+				if (R.deck.length) R.hand.push(R.deck.shift()!)
+			}
 	})
 	g.challenge = shuffle(CHALLENGE.map((_, k) => k), g.rng)
 	g.location = addInst(g, s.location, 'surroundings', null, 'location')
-	const w = addInst(g, s.weather, 'surroundings', null, 'weather', s.weatherSide ?? 'A')
-	g.weather = [w]
+	g.weather = [addInst(g, s.weather, 'surroundings', null, 'weather', s.weatherSide ?? 'A')]
 	for (const m of s.missions) g.missions.push(addInst(g, m.id, 'surroundings', null, 'mission', m.side ?? 'A'))
 	log(g, `Day ${s.day} begins at ${card(s.location).name}. Weather: ${card(s.weather).name}.`)
 	buildPathDeck(g, s.location, s.terrain)
-	// Rangers look at their hands first (mulligan / setup cards), then arrival setup.
 	g.rangers.forEach((_, r) => g.queue.push({ kind: 'mulligan', ranger: r }))
 	return g
 }
 function afterMulligans(g: Game) {
 	arrive(g, g.inst[g.location].id)
-	// Weather "Arrival Setup:" (e.g. Howling Winds adds a Cerberusian Cyclone)
-	for (const u of g.weather) {
-		const lines = P(g, u).arrival
-		if (lines.length) g.queue.push({ kind: 'resolve', title: `${nameOf(g, u)}: setup`, ranger: g.lead, effort: 0, items: lines.map((l) => autoOrItem(g, u, nameOf(g, u), clauseOf(l), g.lead, 0, 0)), after: 'none' })
-	}
-	// "Start of Day" on weather and missions
+	for (const u of g.weather) for (const a of P(g, u).arrival) addJob(g, { title: `${nameOf(g, u)}: setup`, eff: a.effect, src: u, ranger: g.lead })
 	for (const u of [...g.weather, ...g.missions]) {
 		const sd = P(g, u).startOfDay
-		if (sd) g.queue.push({ kind: 'resolve', title: `${nameOf(g, u)}: start of day`, ranger: g.lead, effort: 0, items: [item(g, u, nameOf(g, u), sd)], after: 'none' })
+		if (sd) addJob(g, { title: `${nameOf(g, u)}: start of day`, eff: sd, src: u, ranger: g.lead })
 	}
 }
 
@@ -1082,11 +1702,7 @@ function manual(g: Game, m: ManualOp): string | null {
 			i.attachedTo = m.to
 			i.zone = 'attached'
 			i.faceDown = !!m.faceDown
-			if (m.faceDown) {
-				i.progress = 0
-				i.harm = 0
-			}
-			log(g, `${nameOf(g, m.uid)} is attached ${m.faceDown ? 'facedown ' : ''}to ${nameOf(g, m.to)}.`)
+			log(g, `${nameOf(g, m.uid)} is attached to ${nameOf(g, m.to)}.`)
 			return null
 		}
 		case 'toHand': {
@@ -1200,15 +1816,22 @@ function manual(g: Game, m: ManualOp): string | null {
 
 // ---------------------------------------------------------------- apply
 
+export class RuleError extends Error {}
+const KINDS = ['mulligan', 'test', 'choose', 'ask', 'manual', 'aspect', 'guide', 'scout', 'equip', 'travel', 'dayOver']
+/** Older saves: drop prompts this version doesn't know. */
+export function migrate(g: Game) {
+	g.jobs ??= []
+	g.lastTest ??= null
+	g.queue = g.queue.filter((p) => KINDS.includes(p.kind))
+}
 export function apply(state: Game, it: Intent): Game {
 	const g = clone(state)
+	migrate(g)
 	const err = step(g, it)
 	if (err) throw new RuleError(err)
 	settle(g)
 	return g
 }
-export class RuleError extends Error {}
-/** Like apply(), but returns the error message instead of throwing. */
 export function tryApply(state: Game, it: Intent): { g: Game; err: string | null } {
 	try {
 		return { g: apply(state, it), err: null }
@@ -1256,43 +1879,37 @@ function step(g: Game, it: Intent): string | null {
 			if (head.fatigued) return 'You already suffered fatigue for this test; commit at least 1 energy.'
 			g.queue.shift()
 			g.acting = null
-			// undo the turn start
 			return null
 		}
-		case 'act': {
-			if (head?.kind !== 'resolve') return 'Nothing to resolve.'
-			const itm = head.items[it.item]
-			const a = itm?.clause.actions[it.action]
-			if (!a) return 'No such action.'
-			const pres = itm.src != null && g.inst[itm.src] ? presence(g, itm.src) : 0
-			const who = it.ranger ?? (itm as ResolveItem & { who?: number }).who ?? head.ranger
-			doAction(g, a, itm.src, head.ranger, head.effort, pres, it.target ?? null, who)
-			itm.done[it.action] = true
-			return null
-		}
-		case 'resolved': {
-			if (head?.kind !== 'resolve') return 'Nothing to resolve.'
+		case 'choose': {
+			if (head?.kind !== 'choose') return 'Nothing to choose.'
+			if (it.uids.length < head.min || it.uids.length > head.max || it.uids.some((u) => !head.options.includes(u))) return `Choose ${head.min === head.max ? head.min : `${head.min}–${head.max}`}.`
+			const job = g.jobs[0]
+			if (job) job.picks[head.key] = it.uids
 			g.queue.shift()
-			if (head.result) {
-				const ch = CHALLENGE[head.result.challenge]
-				if (ch.reshuffle) {
-					g.challenge = shuffle([...g.challenge, ...g.challengeDiscard.splice(0)], g.rng)
-					log(g, 'The challenge deck is reshuffled.')
-				}
-			}
-			if (head.after === 'test' || head.after === 'play') {
-				checkClears(g)
-				if (!g.queue.some((p) => p.kind === 'resolve' || p.kind === 'test' || p.kind === 'scout')) endTurn(g, head.ranger)
-				else g.acting = head.ranger
-			}
-			if (head.after === 'refresh') newRound(g)
-			if (!g.queue.length && g.acting != null && g.phase === 'turns') endTurn(g, g.acting)
 			return null
 		}
+		case 'answer': {
+			if (head?.kind !== 'ask') return 'No question.'
+			if (g.jobs[0]) g.jobs[0].asked = it.yes
+			g.queue.shift()
+			return null
+		}
+		case 'aspect': {
+			if (head?.kind !== 'aspect') return 'Nothing to choose.'
+			const k = ASPECTS.indexOf(it.a)
+			if (!head.options.includes(it.a)) return 'Not that one.'
+			if (g.jobs[0]) g.jobs[0].picks[head.key] = [k]
+			g.queue.shift()
+			return null
+		}
+		case 'manualDone':
+			if (head?.kind !== 'manual') return 'Nothing to do.'
+			g.queue.shift()
+			return null
 		case 'guideRead':
 			if (head?.kind !== 'guide') return 'No entry to read.'
 			g.queue.shift()
-			if (!g.queue.length && g.acting != null && g.phase === 'turns') endTurn(g, g.acting)
 			return null
 		case 'scouted': {
 			if (head?.kind !== 'scout') return 'Nothing to scout.'
@@ -1303,7 +1920,6 @@ function step(g: Game, it: Intent): string | null {
 			log(g, `${rangerName(g, head.ranger)} scouts ${head.cards.length} ${head.deck} card${head.cards.length === 1 ? '' : 's'}.`)
 			g.queue.shift()
 			if (head.drawAfter) drawRanger(g, head.ranger, head.drawAfter)
-			if (!g.queue.length && g.acting != null && g.phase === 'turns') endTurn(g, g.acting)
 			return null
 		}
 		case 'play':

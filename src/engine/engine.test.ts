@@ -21,7 +21,10 @@ function through(g: Game): Game {
 		const h = g.queue[0]
 		if (h.kind === 'mulligan') g = apply(g, { t: 'keep', ranger: h.ranger })
 		else if (h.kind === 'guide') g = apply(g, { t: 'guideRead' })
-		else if (h.kind === 'resolve') g = apply(g, { t: 'resolved' })
+		else if (h.kind === 'choose') g = apply(g, { t: 'choose', uids: h.options.slice(0, h.min) })
+		else if (h.kind === 'ask') g = apply(g, { t: 'answer', yes: true })
+		else if (h.kind === 'manual') g = apply(g, { t: 'manualDone' })
+		else if (h.kind === 'aspect') g = apply(g, { t: 'aspect', a: h.options[0] })
 		else if (h.kind === 'scout') g = apply(g, { t: 'scouted', top: h.cards, bottom: [] })
 		else break
 	}
@@ -59,11 +62,10 @@ test('Traverse on the location adds progress equal to effort; a test takes a tur
 	g = apply(g, { t: 'test', ranger: 0, src: null, test: 'traverse', target: g.location })
 	assert.equal(g.queue[0].kind, 'test')
 	g = apply(g, { t: 'commit', energy: before, discards: [], extra: 0 })
-	const r = g.queue[0]
-	assert.equal(r.kind, 'resolve')
-	if (r.kind !== 'resolve' || !r.result) throw new Error()
-	if (r.result.success) assert.equal(g.inst[g.location].progress, r.result.effort)
-	else assert.equal(g.rangers[0].injuries, 1)
+	const r = g.lastTest!
+	assert.ok(r)
+	if (r.success) assert.ok(g.inst[g.location].progress >= r.effort)
+	else assert.ok(g.rangers[0].injuries >= 1)
 	g = through(g)
 	assert.equal(g.lastTurn, 0)
 	// Same Ranger again needs the role
@@ -87,7 +89,7 @@ test('cards within reach are between you and cards along the way', () => {
 	assert.match(canTravel(g) ?? '', /progress|obstacle/)
 })
 
-test('resting by all Rangers leads to travel; staying refreshes and starts a new round', () => {
+test('when every Ranger rests and you can\'t travel, a new round starts', () => {
 	let g = through(newDay(setup()))
 	g = apply(g, { t: 'rest', ranger: 0 })
 	g = through(g)
@@ -96,12 +98,9 @@ test('resting by all Rangers leads to travel; staying refreshes and starts a new
 		g = through(g)
 	}
 	if (g.ended) return
-	assert.equal(g.queue[0]?.kind, 'travel')
-	const hand = g.rangers[0].hand.length
-	g = apply(g, { t: 'stay' })
-	g = through(g)
+	// Not enough progress to travel: the round ends and a new one starts by itself.
 	assert.equal(g.round, 2)
-	assert.equal(g.rangers[0].hand.length, hand + 1)
+	assert.equal(g.phase, 'turns')
 })
 
 test('travel builds the new path deck from the terrain of the path taken', () => {
@@ -128,12 +127,12 @@ test('the parser reads tests and challenge effects', () => {
 })
 
 test('a random day plays out without crashing', () => {
-	for (let seed = 1; seed <= 25; seed++) {
+	for (let seed = 1; seed <= 60; seed++) {
 		let g = through(newDay(setup(2, seed)))
 		for (let k = 0; k < 300 && !g.ended; k++) {
 			const h = g.queue[0]
 			if (h) {
-				if (h.kind === 'test') g = apply(g, { t: 'commit', energy: 1, discards: [], extra: 0 })
+				if (h.kind === 'test') g = apply(g, { t: 'commit', energy: 1, discards: [0, 1], extra: 0, dodgeRole: true, boosts: [], responses: [0] })
 				else if (h.kind === 'travel') {
 					const links = card(g.inst[g.location].id).links!.filter((l) => l.path !== 'river')
 					g = canTravel(g) == null ? apply(g, { t: 'travel', to: links[k % links.length].to, camp: k > 200 }) : apply(g, { t: 'stay' })
@@ -161,7 +160,7 @@ test('a random day plays out without crashing', () => {
 				const res = tryApply(g, { t: 'test', ranger: r, src: t.src, test: t.test, target })
 				g = res.err ? apply(g, { t: 'rest', ranger: r }) : res.g
 			} else if (choice === 1 && R.hand.length) {
-				const h = R.hand.findIndex((id) => ['Gear', 'Being', 'Feature'].includes(card(id).type))
+				const h = R.hand.findIndex((id) => ['Gear', 'Being', 'Feature', 'Moment'].includes(card(id).type))
 				const res = h >= 0 ? tryApply(g, { t: 'play', ranger: r, hand: h }) : { g, err: 'x' }
 				g = res.err ? apply(g, { t: 'rest', ranger: r }) : res.g
 			} else g = apply(g, { t: 'rest', ranger: r })
@@ -169,4 +168,36 @@ test('a random day plays out without crashing', () => {
 		assert.ok(g.round >= 1)
 		if (process.env.SHOW) console.log(seed, g.round, g.ended?.reason ?? g.phase, g.queue[0]?.kind)
 	}
+})
+
+test('challenge effects run by themselves: Pouncing Atrox crest exhausts it and injures you', async () => {
+	const { effect } = await import('./dsl')
+	const e = effect('If you have 2 or more fatigue, exhaust this being. [conditional] Suffer 1 injury.')
+	assert.deepEqual(e.cond, { c: 'youFatigue', min: 2 })
+	assert.equal(e.pre[0].k, 'exhaust')
+	assert.equal(e.steps[0].k, 'injury')
+	const f = effect("If there is an active predator, exhaust it. [conditional] Add [harm] to this being equal to that predator's presence.")
+	assert.equal(f.cond?.c, 'exists')
+	assert.ok(f.auto)
+})
+
+test('Eagle Eye scouts 3 path cards then draws 1', () => {
+	let g = through(newDay(setup(1)))
+	g = structuredClone(g)
+	g.rangers[0].hand.push('01001')
+	g.rangers[0].energy.AWA = 3
+	const deck = g.pathDeck.length
+	g = apply(g, { t: 'play', ranger: 0, hand: g.rangers[0].hand.length - 1 })
+	assert.equal(g.queue[0]?.kind, 'scout')
+	const h = g.queue[0] as Extract<typeof g.queue[0], { kind: 'scout' }>
+	assert.equal(h.cards.length, 3)
+	g = apply(g, { t: 'scouted', top: h.cards, bottom: [] })
+	assert.equal(g.pathDeck.length, deck - 1)
+})
+
+test('Vigilant counts AWA left in your pool as conflict icons', async () => {
+	const { iconsFor } = await import('./engine')
+	const g = newDay(setup(1))
+	assert.equal(iconsFor(g, 0, '01094', 'conflict', { AWA: 2, FIT: 0, FOC: 0, SPI: 0 }), 2)
+	assert.equal(iconsFor(g, 0, '01094', 'reason'), 0)
 })

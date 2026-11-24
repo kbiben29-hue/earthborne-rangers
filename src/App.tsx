@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { deleteCampaign, finishDay, loadAll, newCampaign, saveCampaign, type Campaign } from './campaign/campaign'
-import { newDay, tryApply } from './engine/engine'
+import { migrate, newDay, tryApply } from './engine/engine'
 import type { Game, Intent } from './engine/types'
 import { Board } from './ui/Board'
 import { CampaignView, Home, NewCampaign } from './ui/Screens'
@@ -18,6 +18,7 @@ export default function App() {
 	const toastTimer = useRef<number>(0)
 
 	const current = 'id' in screen ? campaigns.find((c) => c.id === screen.id) : undefined
+	if (current?.game) migrate(current.game)
 	const update = useCallback((c: Campaign) => {
 		saveCampaign(c)
 		setCampaigns(loadAll())

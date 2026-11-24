@@ -36,11 +36,14 @@ campaign guide, the game tells you which entry to read.
   - **travel** on the Valley map (river paths need a card), camping, staying;
   - **refresh**: injuries, drawing, energy, readying, Refresh effects on weather and missions;
   - fatigue, soothing, injuries and every way a day can end.
-- **Card effects**: the game reads the card text. Plain effects ("Add 1 harm to this feature", "Suffer 1
-  injury", "Discard 1 rain from this card ⏩ Each Ranger suffers 1 fatigue") are done for you. When
-  something needs a choice or a judgement, the effect is shown with buttons for the parts the game
-  understood, and **card tools** (tap any card) for the rest: progress, harm, tokens, exhaust, move,
-  attach, flip, discard, Ranger tokens, search a deck or set, scout, draw.
+- **Card effects run themselves**: challenge effects, test results, clears, weather, refresh and arrival
+  setup are carried out by the game ("If there is an active predator, exhaust it ⏩ add harm equal to its
+  presence"). You're only asked for real choices: which card, which energy, one option or the other.
+  The cards in your starting decks are handled too: Vigilant-style attributes, gear that commits effort,
+  dodging, Hiking Greaves, Memlev Trekking Poles, responses like A Leaf in the Breeze or Walk With Me.
+  A handful of unusual cards still ask you to do one step by hand; every card also has **card tools**
+  (tap it) for fixing anything: progress, harm, tokens, exhaust, move, attach, flip, discard, Ranger
+  tokens, search a deck or set, scout, draw.
 - **Undo** any number of moves, and every day saves itself.
 
 ## iPhone and iPad

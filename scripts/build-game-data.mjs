@@ -11,6 +11,8 @@ const read = (p) => JSON.parse(fs.readFileSync(path.join(root, p), 'utf8'))
 const db = read('data/dragncards/card-db.json')
 const def = read('data/dragncards/game-def.json')
 const challenge = read('data/challenge-deck.json')
+// RangersDB has cleaner Ranger card text (line breaks, [AWA] icons): use it where the ids match.
+const rdb = Object.fromEntries(read('data/cards.json').map((c) => [c.id, c]))
 
 // How many copies of each card (from DragnCards' prebuilt decks).
 const qty = {}
@@ -72,7 +74,7 @@ for (const [id, c] of Object.entries(db)) {
 		img: a.imageUrl,
 	}
 	if (a.traits) o.traits = a.traits
-	const text = clean(a.text)
+	const text = a.cardBack === 'player' && rdb[id]?.name === a.name && rdb[id].text ? clean(rdb[id].text) : clean(a.text)
 	if (text) o.text = text
 	const kw = keywords(text)
 	if (kw.length) o.kw = kw
@@ -95,8 +97,9 @@ for (const [id, c] of Object.entries(db)) {
 		if (m) o.tokens = { n: Number(m[1]), name: m[2], per: a.scaleGenericTokenPerPlayer === 'TRUE' }
 	}
 	const ap = {}
+	const fromRdb = a.cardBack === 'player' && rdb[id]?.name === a.name
 	for (const k of ['conflict', 'reason', 'exploration', 'connection']) {
-		const n = Number(a[`${k}_number`] || 0)
+		const n = fromRdb ? Number(rdb[id][`approach_${k}`] || 0) : Number(a[`${k}_number`] || 0)
 		if (n) ap[k] = n
 	}
 	if (Object.keys(ap).length) o.icons = ap

@@ -10,16 +10,18 @@ import {
 	costOf,
 	equipUsed,
 	has,
+	iconsFor,
 	nameOf,
 	P,
 	presence,
 	SYM_LABEL,
+	testOptions,
 	tokenEffort,
 	typeOf,
 	zoneCards,
 } from '../engine/engine'
-import { amountValue, COMMON_TESTS, type Action } from '../engine/text'
-import type { Game, Intent, ManualOp, Prompt, ResolveItem } from '../engine/types'
+import { COMMON_TESTS } from '../engine/text'
+import type { Game, Intent, ManualOp, Prompt } from '../engine/types'
 import { CardTile, cardImg, HandCard, imgUrl, RulesText } from './Card'
 
 type Dispatch = (it: Intent) => string | null
@@ -81,7 +83,12 @@ export function Board({
 		return () => window.removeEventListener('keydown', k)
 	}, [])
 
+	const choosing = head?.kind === 'choose' ? head : null
 	const tap = (uid: number) => {
+		if (choosing && choosing.max === 1 && choosing.options.includes(uid)) {
+			dispatch({ t: 'choose', uids: [uid] })
+			return
+		}
 		if (pick) {
 			if (pick.ok(uid)) {
 				pick.done(uid)
@@ -97,7 +104,7 @@ export function Board({
 		const att = attachments(g, uid)
 		return (
 			<div className="stack" key={uid}>
-				<CardTile g={g} inst={inst} small={small} onClick={() => tap(uid)} selected={sel?.kind === 'inst' && sel.uid === uid} pickable={!!pick && pick.ok(uid)} />
+				<CardTile g={g} inst={inst} small={small} onClick={() => tap(uid)} selected={sel?.kind === 'inst' && sel.uid === uid} pickable={(!!pick && pick.ok(uid)) || !!choosing?.options.includes(uid)} />
 				{att.map((a) => (
 					<div className="attached" key={a.uid}>
 						<CardTile g={g} inst={a} small onClick={() => tap(a.uid)} pickable={!!pick && pick.ok(a.uid)} />
@@ -200,6 +207,9 @@ export function Board({
 			</main>
 
 			<section className="handbar">
+				<div className="mobile-only">
+					<LastTest g={g} />
+				</div>
 				<div className="hand-head">
 					<span className={`chip r${me}`}>{R.name}'s hand</span>
 					{g.rangers.length > 1 && (
@@ -214,7 +224,7 @@ export function Board({
 					{g.phase === 'turns' && !head && (
 						<span className="acts">
 							{COMMON_TESTS.map((t) => (
-								<button key={t.key} disabled={!myTurnOk || R.energy[t.aspect] < 1} onClick={() => startCommon(t.key)} title={t.effect.text}>
+								<button key={t.key} disabled={!myTurnOk || R.energy[t.aspect] < 1} onClick={() => startCommon(t.key)} title={t.text}>
 									<b className={`asp-${t.aspect}`}>{t.aspect}</b> {t.name}
 								</button>
 							))}
@@ -235,6 +245,7 @@ export function Board({
 			</section>
 
 			<aside className="side">
+				<LastTest g={g} />
 				{head && <PromptPanel g={g} head={head} dispatch={dispatch} setPick={setPick} onDayOver={onDayOver} hooks={hooks} />}
 				{sel && (
 					<Viewer
@@ -326,67 +337,32 @@ function Help({ g, me }: { g: Game; me: number }) {
 
 // ------------------------------------------------------------------ prompts
 
-function describe(a: Action, effort: number, pres: number, g: Game, it: ResolveItem): string {
-	const n = 'amount' in a ? amountValue(a.amount, effort, pres) : 0
-	const src = it.src != null && g.inst[it.src] ? nameOf(g, it.src) : 'it'
-	switch (a.kind) {
-		case 'progress':
-		case 'harm':
-			return `Add ${n} ${a.kind} to ${a.to === 'location' ? 'the location' : a.to === 'self' ? src : 'a card…'}`
-		case 'removeProgress':
-		case 'removeHarm':
-			return `Remove ${n} ${a.kind === 'removeProgress' ? 'progress' : 'harm'} from ${a.to === 'location' ? 'the location' : src}`
-		case 'exhaust':
-		case 'ready':
-			return `${a.kind === 'exhaust' ? 'Exhaust' : 'Ready'} ${a.to === 'self' ? src : a.to === 'role' ? 'your role' : 'a card…'}`
-		case 'discard':
-			return `Discard ${a.to === 'self' ? src : 'a card…'}`
-		case 'flip':
-			return `Flip ${src}`
-		case 'move':
-			return `Move ${a.to === 'self' ? src : 'a card…'}${a.area ? (a.area === 'reach' ? ' within reach' : ' along the way') : ''}`
-		case 'fatigue':
-			return `${a.who === 'each' ? 'Each Ranger suffers' : 'Suffer'} ${n} fatigue`
-		case 'injury':
-			return `${a.who === 'each' ? 'Each Ranger suffers' : 'Suffer'} ${n} injur${n === 1 ? 'y' : 'ies'}`
-		case 'soothe':
-			return `Soothe ${n} fatigue`
-		case 'heal':
-			return `Heal ${n} injury`
-		case 'drawRanger':
-			return `Draw ${n} Ranger card${n === 1 ? '' : 's'}`
-		case 'drawPath':
-			return `Draw ${n} path card${n === 1 ? '' : 's'}`
-		case 'scoutPath':
-			return `Scout ${n} path card${n === 1 ? '' : 's'}`
-		case 'scoutRanger':
-			return `Scout ${n} Ranger card${n === 1 ? '' : 's'}`
-		case 'selfFatigues':
-			return `${src} fatigues you (${pres})`
-		case 'tokens':
-			return `${a.add ? 'Add' : 'Remove'} ${n} token${n === 1 ? '' : 's'} ${a.add ? 'to' : 'from'} ${src}`
-		case 'rangerToken':
-			return a.to === 'self' ? `Move your Ranger token to ${src}` : 'Return your Ranger token to your role'
-		case 'guide':
-			return `Read campaign guide entry ${a.entry}`
-		case 'searchPath':
-			return `Search the path deck for the next ${a.what} and ${a.then === 'discard' ? 'discard it' : 'put it into play'}`
-		case 'searchSet':
-			return `Search the ${a.set} set for ${a.name} and ${a.then === 'shuffle' ? 'shuffle it into the path deck' : 'put it into play'}`
-		case 'flipIf':
-			return a.max === 0 ? `Flip ${src} if it has no tokens left` : `Flip ${src} if it has ${a.min}+ tokens`
-	}
-}
-const needsPick = (a: Action) => 'to' in a && (a.to === 'choose' || a.to === 'target')
-
 function PromptPanel({ g, head, dispatch, setPick, onDayOver, hooks }: { g: Game; head: Prompt; dispatch: Dispatch; setPick: (p: Pick) => void; onDayOver: () => void; hooks: CampaignHooks }) {
 	switch (head.kind) {
 		case 'mulligan':
 			return <Mulligan g={g} r={head.ranger} dispatch={dispatch} />
 		case 'test':
 			return <Commit g={g} head={head} dispatch={dispatch} />
-		case 'resolve':
-			return <Resolve g={g} head={head} dispatch={dispatch} setPick={setPick} />
+		case 'choose':
+			return <Choose g={g} head={head} dispatch={dispatch} />
+		case 'ask':
+			return <Ask head={head} dispatch={dispatch} />
+		case 'manual':
+			return <Manual head={head} dispatch={dispatch} />
+		case 'aspect':
+			return (
+				<div className="panel prompt">
+					<h3>{head.title}</h3>
+					<p>{head.text}</p>
+					<div className="btns">
+						{head.options.map((a) => (
+							<button key={a} className={`en en-${a}`} onClick={() => dispatch({ t: 'aspect', a })}>
+								{a}
+							</button>
+						))}
+					</div>
+				</div>
+			)
 		case 'guide':
 			return <Guide entry={head.entry} why={head.why} dispatch={dispatch} hooks={hooks} />
 		case 'scout':
@@ -452,122 +428,235 @@ function Mulligan({ g, r, dispatch }: { g: Game; r: number; dispatch: Dispatch }
 
 function Commit({ g, head, dispatch }: { g: Game; head: Extract<Prompt, { kind: 'test' }>; dispatch: Dispatch }) {
 	const R = g.rangers[head.ranger]
-	const max = R.energy[head.aspect]
+	const opt = testOptions(g, head)
+	const [swap, setSwap] = useState(false)
+	const aspect = swap && opt.swap ? opt.swap.to : head.aspect
+	const max = R.energy[aspect]
 	const [energy, setEnergy] = useState(Math.min(max, Math.max(1, head.diff)))
 	const [disc, setDisc] = useState<number[]>([])
+	const [vers, setVers] = useState<number[]>([])
 	const [extra, setExtra] = useState(0)
 	const [diff, setDiff] = useState(head.diff)
-	const ap = head.approach as 'conflict'
-	const icons = disc.reduce((s, i) => s + (card(R.hand[i]).icons?.[ap] ?? 0), 0)
+	const [dodgeRole, setDodgeRole] = useState(false)
+	const [buffers, setBuffers] = useState(0)
+	const [boosts, setBoosts] = useState<number[]>([])
+	const [resp, setResp] = useState<number[]>([])
+	const pool = { ...R.energy, [aspect]: R.energy[aspect] - energy }
+	const iconsOf = (i: number) => iconsFor(g, head.ranger, R.hand[i], head.approach, pool) + (vers.includes(i) ? 1 : 0)
+	const icons = disc.reduce((s, i) => s + iconsOf(i), 0)
 	const tok = tokenEffort(g, head.ranger, head.target)
-	const total = energy + icons + tok + extra
+	const total = Math.min(energy, max) + icons + tok + extra + boosts.length
+	const dodges = (dodgeRole ? 1 : 0) + resp.reduce((n, h) => n + (opt.responses.find((x) => x.hand === h && x.kind === 'dodge')?.n ?? 0), 0)
+	const hurting = opt.inWay.filter((u) => !has(g, u, 'Friendly')).sort((a, b) => presence(g, b) - presence(g, a))
+	const fat = hurting.slice(dodges).reduce((n, u) => n + Math.max(0, presence(g, u) - buffers), 0)
+	const toggle = (list: number[], set: (x: number[]) => void, v: number) => set(list.includes(v) ? list.filter((x) => x !== v) : [...list, v])
+	const respIdx = new Set(resp)
 	return (
 		<div className="panel prompt">
 			<h3>
-				{head.name} <small className={`asp-${head.aspect}`}>{head.aspect}</small> + <small>{APPROACH_ICON[head.approach]}</small>
+				{head.name} <small className={`asp-${aspect}`}>{aspect}</small> + <small>{APPROACH_ICON[head.approach]}</small>
 			</h3>
 			{head.target != null && g.inst[head.target] && <p className="sub">Interacting with {nameOf(g, head.target)}.</p>}
-			{head.fatigued > 0 && <p className="warn">You suffered {head.fatigued} fatigue from cards in the way.</p>}
+			{hurting.length > 0 && (
+				<p className={fat ? 'warn' : 'sub'}>
+					In the way: {hurting.map((u) => `${nameOf(g, u)} (${presence(g, u)})`).join(', ')} → you suffer {fat} fatigue.
+				</p>
+			)}
+			{(opt.dodgeRole != null || opt.greaves || opt.swap) && (
+				<div className="checks">
+					{opt.dodgeRole != null && hurting.length > 0 && (
+						<label className="check">
+							<input type="checkbox" checked={dodgeRole} onChange={(e) => setDodgeRole(e.target.checked)} /> Exhaust {nameOf(g, opt.dodgeRole)}: dodge 1 card
+						</label>
+					)}
+					{opt.swap && (
+						<label className="check">
+							<input type="checkbox" checked={swap} onChange={(e) => setSwap(e.target.checked)} /> Use {nameOf(g, opt.swap.uid)}: {opt.swap.to} instead of {head.aspect}
+						</label>
+					)}
+					{opt.greaves && hurting.length > 0 && (
+						<div className="stepper">
+							<span>{nameOf(g, opt.greaves.uid)}: buffers to use</span>
+							<button onClick={() => setBuffers(Math.max(0, buffers - 1))}>−</button>
+							<b>{buffers}</b>
+							<button onClick={() => setBuffers(Math.min(opt.greaves!.max, buffers + 1))}>+</button>
+						</div>
+					)}
+				</div>
+			)}
 			<div className="stepper">
 				<span>
-					{head.aspect} energy <small>(have {max})</small>
+					{aspect} energy <small>(have {max})</small>
 				</span>
 				<button onClick={() => setEnergy(Math.max(1, energy - 1))}>−</button>
-				<b>{energy}</b>
+				<b>{Math.min(energy, max)}</b>
 				<button onClick={() => setEnergy(Math.min(max, energy + 1))}>+</button>
 			</div>
 			<p className="sub">Discard cards with {APPROACH_ICON[head.approach]} icons for more effort:</p>
 			<div className="hand mini">
 				{R.hand.map((id, i) => {
-					const n = card(id).icons?.[ap] ?? 0
-					return <HandCard key={i} id={id} dim={!n} selected={disc.includes(i)} note={n ? `+${n}` : undefined} onClick={() => n && setDisc((d) => (d.includes(i) ? d.filter((x) => x !== i) : [...d, i]))} />
+					if (respIdx.has(i)) return null
+					const n = iconsOf(i)
+					const canV = opt.versatile.includes(i)
+					return (
+						<HandCard
+							key={i}
+							id={id}
+							dim={!n && !canV}
+							selected={disc.includes(i)}
+							note={n ? `+${n}` : canV ? '+1?' : undefined}
+							onClick={() => {
+								if (canV && !n && !vers.includes(i)) {
+									setVers([...vers, i])
+									setDisc([...disc, i])
+								} else if (n || canV) {
+									toggle(disc, setDisc, i)
+									if (disc.includes(i)) setVers(vers.filter((x) => x !== i))
+								}
+							}}
+						/>
+					)
 				})}
 			</div>
-			<div className="stepper">
-				<span>Other effort (gear, abilities)</span>
-				<button onClick={() => setExtra(extra - 1)}>−</button>
-				<b>{extra}</b>
-				<button onClick={() => setExtra(extra + 1)}>+</button>
-			</div>
-			<div className="stepper">
-				<span>Difficulty</span>
-				<button onClick={() => setDiff(Math.max(0, diff - 1))}>−</button>
-				<b>{diff}</b>
-				<button onClick={() => setDiff(diff + 1)}>+</button>
-			</div>
+			{vers.length > 0 && <p className="sub">Versatile: you suffer 1 fatigue for each one you commit this way.</p>}
+			{opt.boosts.length > 0 && (
+				<div className="checks">
+					{opt.boosts.map((b) => (
+						<label className="check" key={b.uid}>
+							<input type="checkbox" checked={boosts.includes(b.uid)} onChange={() => toggle(boosts, setBoosts, b.uid)} /> {b.label}
+						</label>
+					))}
+				</div>
+			)}
+			{opt.responses.length > 0 && (
+				<div className="checks">
+					{opt.responses.map((rs) => (
+						<label className="check" key={rs.hand}>
+							<input type="checkbox" checked={resp.includes(rs.hand)} onChange={() => toggle(resp, setResp, rs.hand)} disabled={R.energy[rs.aspect] < rs.cost} /> Play {rs.label}{' '}
+							<small>
+								({rs.cost} {rs.aspect})
+							</small>
+						</label>
+					))}
+				</div>
+			)}
+			<details>
+				<summary>More (other effort, difficulty)</summary>
+				<div className="stepper">
+					<span>Other effort</span>
+					<button onClick={() => setExtra(extra - 1)}>−</button>
+					<b>{extra}</b>
+					<button onClick={() => setExtra(extra + 1)}>+</button>
+				</div>
+				<div className="stepper">
+					<span>Difficulty</span>
+					<button onClick={() => setDiff(Math.max(0, diff - 1))}>−</button>
+					<b>{diff}</b>
+					<button onClick={() => setDiff(diff + 1)}>+</button>
+				</div>
+			</details>
 			<p className="total">
 				Effort before the challenge card: <b>{total}</b>
 				{tok ? ` (incl. ${tok} from Ranger tokens)` : ''} vs difficulty <b>{diff}</b>
 			</p>
 			<div className="btns">
-				<button className="primary" onClick={() => dispatch({ t: 'commit', energy, discards: disc, extra, diff })}>
+				<button
+					className="primary"
+					disabled={max < 1}
+					onClick={() =>
+						dispatch({ t: 'commit', energy: Math.min(energy, max), discards: disc, extra, diff, dodgeRole, buffers, boosts, swap, responses: resp, versatile: vers })
+					}
+				>
 					Draw a challenge card
 				</button>
-				{head.fatigued === 0 && <button onClick={() => dispatch({ t: 'cancelTest' })}>Cancel</button>}
+				<button onClick={() => dispatch({ t: 'cancelTest' })}>Cancel</button>
 			</div>
 		</div>
 	)
 }
 
-function Resolve({ g, head, dispatch, setPick }: { g: Game; head: Extract<Prompt, { kind: 'resolve' }>; dispatch: Dispatch; setPick: (p: Pick) => void }) {
-	const res = head.result
-	const ch = res ? CHALLENGE[res.challenge] : null
+function Choose({ g, head, dispatch }: { g: Game; head: Extract<Prompt, { kind: 'choose' }>; dispatch: Dispatch }) {
+	const [sel, setSel] = useState<number[]>([])
 	return (
 		<div className="panel prompt">
 			<h3>{head.title}</h3>
-			{res && ch && (
-				<div className={`result ${res.success ? 'ok' : 'bad'}`}>
-					<img className="challenge" src={imgUrl(`${ch.id}.jpg`)} alt="Challenge card" />
-					<div>
-						<b>{res.success ? 'Success!' : 'Failed.'}</b>
-						<p>
-							Effort {res.base} {res.mod >= 0 ? '+' : '−'} {Math.abs(res.mod)} = <b>{res.effort}</b> vs {res.diff}
-						</p>
-						<p>Challenge symbol: {SYM_LABEL[res.symbol]}</p>
-					</div>
-				</div>
+			<p>{head.text}</p>
+			<p className="sub">{head.max === 1 ? 'Tap a glowing card on the table, or pick it here.' : `Pick ${head.max}.`}</p>
+			<ul className="options">
+				{head.options.map((u) => (
+					<li key={u}>
+						<button
+							className={sel.includes(u) ? 'on' : ''}
+							onClick={() => {
+								if (head.max === 1) dispatch({ t: 'choose', uids: [u] })
+								else setSel((x) => (x.includes(u) ? x.filter((y) => y !== u) : x.length < head.max ? [...x, u] : x))
+							}}
+						>
+							<img src={cardImg(g.inst[u].id, g.inst[u].side)} alt="" />
+							{nameOf(g, u)}
+						</button>
+					</li>
+				))}
+			</ul>
+			{head.max > 1 && (
+				<button className="primary" disabled={sel.length < head.min} onClick={() => dispatch({ t: 'choose', uids: sel })}>
+					Done
+				</button>
 			)}
-			{head.items.length === 0 && res && <p className="sub">No card effects to resolve.</p>}
-			<ol className="items">
-				{head.items.map((it, k) => {
-					const pres = it.src != null && g.inst[it.src] ? presence(g, it.src) : 0
-					return (
-						<li key={k} className={it.auto ? 'auto' : ''}>
-							<div className="item-title">
-								{it.title}
-								{it.auto && <span className="done-tag">done for you</span>}
-							</div>
-							<RulesText text={it.clause.text} />
-							{!it.auto && it.clause.actions.length > 0 && (
-								<div className="btns">
-									{it.clause.actions.map((a, j) => (
-										<button
-											key={j}
-											className={it.done[j] ? 'done' : ''}
-											onClick={() => {
-												if (needsPick(a)) {
-													setPick({
-														why: describe(a, head.effort, pres, g, it).replace('…', ': tap it'),
-														ok: (uid) => !!g.inst[uid],
-														done: (uid) => dispatch({ t: 'act', item: k, action: j, target: uid }),
-													})
-												} else dispatch({ t: 'act', item: k, action: j })
-											}}
-										>
-											{it.done[j] ? '✓ ' : ''}
-											{describe(a, head.effort, pres, g, it)}
-										</button>
-									))}
-								</div>
-							)}
-							{!it.auto && !it.clause.complete && <p className="sub">Do what applies — the buttons cover what the game understood; use the card tools for the rest.</p>}
-						</li>
-					)
-				})}
-			</ol>
-			<button className="primary" onClick={() => dispatch({ t: 'resolved' })}>
-				Continue
+		</div>
+	)
+}
+
+function Ask({ head, dispatch }: { head: Extract<Prompt, { kind: 'ask' }>; dispatch: Dispatch }) {
+	return (
+		<div className="panel prompt">
+			<h3>{head.title}</h3>
+			{head.yes ? (
+				<p>{head.text}</p>
+			) : (
+				<p>
+					Is this true right now? <b>“{head.text}”</b>
+				</p>
+			)}
+			<div className="btns">
+				<button className="primary" onClick={() => dispatch({ t: 'answer', yes: true })}>
+					{head.yes ?? 'Yes'}
+				</button>
+				<button onClick={() => dispatch({ t: 'answer', yes: false })}>{head.no ?? 'No'}</button>
+			</div>
+		</div>
+	)
+}
+
+function Manual({ head, dispatch }: { head: Extract<Prompt, { kind: 'manual' }>; dispatch: Dispatch }) {
+	return (
+		<div className="panel prompt">
+			<h3>{head.title}</h3>
+			<p>
+				Do this by hand (tap cards for their tools): <b>{head.text}</b>
+			</p>
+			<button className="primary" onClick={() => dispatch({ t: 'manualDone' })}>
+				Done
 			</button>
+		</div>
+	)
+}
+
+export function LastTest({ g }: { g: Game }) {
+	const t = g.lastTest
+	if (!t) return null
+	const ch = CHALLENGE[t.challenge]
+	return (
+		<div className={`last-test ${t.success ? 'ok' : 'bad'}`}>
+			<img src={imgUrl(`${ch.id}.jpg`)} alt="Challenge card" />
+			<div>
+				<b>
+					{t.name}: {t.success ? 'success' : 'failed'}
+				</b>
+				<span>
+					Effort {t.base} {t.mod >= 0 ? '+' : '−'} {Math.abs(t.mod)} = {t.effort} vs {t.diff} · {SYM_LABEL[t.symbol]}
+				</span>
+			</div>
 		</div>
 	)
 }
@@ -718,7 +807,7 @@ function Viewer({
 		const cost = costOf(id)
 		const canPlay = c.type !== 'Attribute'
 		const play = (x?: number) => {
-			if (c.type === 'Attachment') {
+			if (c.type === 'Attachment' && !/^Search the path deck and discard for/i.test((c.text ?? '').replace(/<[^>]+>/g, ''))) {
 				setPick({ why: `Attach ${c.name}: tap the card to attach it to`, ok: (uid) => !!g.inst[uid], done: (uid) => dispatch({ t: 'play', ranger: sel.ranger, hand: sel.index, target: uid, x, useRole }) })
 				close()
 				return
@@ -761,7 +850,7 @@ function Viewer({
 		dispatch({ t: 'manual', op: o })
 	}
 	const fat = between(g, me, inst.uid).filter((u) => !has(g, u, 'Friendly')).reduce((s, u) => s + presence(g, u), 0)
-	const abilities = p.other.map((l, i) => ({ l, i })).filter(({ l }) => /^(<b>)?\s*(Exhaust|Response)/i.test(l.replace(/<[^>]+>/g, '')))
+	const abilities = p.abilities.map((a, i) => ({ l: a.text, i, kind: a.kind })).filter((a) => a.kind === 'exhaust' && !/^Exhaust[^:]*: When (?:a Ranger|you) performs?/i.test(a.l))
 	return (
 		<div className="panel viewer">
 			<button className="close" onClick={close}>×</button>
@@ -792,7 +881,7 @@ function Viewer({
 				<div className="btns">
 					{abilities.map(({ l, i }) => (
 						<button key={i} onClick={() => dispatch({ t: 'ability', ranger: me, uid: inst.uid, line: i })}>
-							Use: {l.replace(/<[^>]+>/g, '').slice(0, 40)}…
+							Use: {l.slice(0, 48)}{l.length > 48 ? '…' : ''}
 						</button>
 					))}
 				</div>
