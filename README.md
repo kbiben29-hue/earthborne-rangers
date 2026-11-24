@@ -2,9 +2,28 @@
 
 A browser version of **Earthborne Rangers** (Earthborne Games) is on its way here, built like
 [Argaia](https://github.com/kbiben29-hue/Argaia) and Afterlife. The first step is done: every
-Ranger card is saved in this repo.
+card in the game is saved in this repo, with its picture.
 
-## Card data
+## Path, location, weather, mission and challenge cards (and pictures)
+
+From the card database of the [DragnCards](https://dragncards.com) Earthborne Rangers plugin
+([filippopence/dragncards-ebr-plugin](https://github.com/filippopence/dragncards-ebr-plugin)),
+whose authors typed the cards in by hand.
+
+| Path | Contents |
+|---|---|
+| `data/dragncards/card-db.json` | All 762 cards (Ranger and path), side `A` and, for two-sided cards, side `B` |
+| `data/dragncards/game-def.json` | The plugin's game setup (prebuilt decks, layouts, tokens) |
+| `data/challenge-deck.json` | The 24 challenge cards: aspect modifiers, symbol (sun / mountain / crest), reshuffle |
+| `images/<file>.jpg` | A picture of every card (`imageUrl` in card-db), plus `back-*.jpg` card backs |
+
+Most path cards have their text in the database. Challenge cards, missions and the Moments
+expansions only have pictures; `challenge-deck.json` was read off the pictures.
+
+The **Fetch path cards** GitHub Action refreshes this every Monday
+(**Actions → Fetch path cards → Run workflow** to run it now).
+
+## Ranger cards
 
 Every Ranger card from [RangersDB](https://rangersdb.com), taken from its open data repo
 [zzorba/rangers-card-data](https://github.com/zzorba/rangers-card-data).
@@ -23,8 +42,7 @@ Each card has fields like `id`, `name`, `type_id`, `set_id`, `aspect_id`, `cost`
 (`approach_conflict`, `approach_reason`, `approach_exploration`, `approach_connection`) and,
 for beings, `presence`, `harm` and `progress`.
 
-**What RangersDB doesn't have:** path cards (terrain sets, beings and features you meet on the
-trail, weather, locations, missions), the challenge deck, and card pictures.
+RangersDB doesn't have path cards or pictures; those come from DragnCards (above).
 
 ## Updating
 
@@ -40,5 +58,5 @@ node scripts/update-cards.mjs /tmp/rangers-card-data
 
 ## Credits
 
-Card data comes from RangersDB, a fan-made site. Earthborne Rangers is a game by Earthborne Games.
+Card data comes from RangersDB and the DragnCards Earthborne plugin, both fan-made. Earthborne Rangers is a game by Earthborne Games.
 This repo is for personal use and isn't affiliated with either.

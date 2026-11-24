@@ -1,0 +1,218 @@
+[
+	{
+		"id": "00001",
+		"AWA": 0,
+		"SPI": 1,
+		"FIT": 0,
+		"FOC": -1,
+		"symbol": "mountain",
+		"reshuffle": false
+	},
+	{
+		"id": "00002",
+		"AWA": 1,
+		"SPI": 0,
+		"FIT": -1,
+		"FOC": 0,
+		"symbol": "mountain",
+		"reshuffle": false
+	},
+	{
+		"id": "00003",
+		"AWA": 0,
+		"SPI": 0,
+		"FIT": -1,
+		"FOC": 1,
+		"symbol": "mountain",
+		"reshuffle": false
+	},
+	{
+		"id": "00004",
+		"AWA": -1,
+		"SPI": 1,
+		"FIT": 1,
+		"FOC": -1,
+		"symbol": "mountain",
+		"reshuffle": false
+	},
+	{
+		"id": "00005",
+		"AWA": 1,
+		"SPI": -1,
+		"FIT": 0,
+		"FOC": 0,
+		"symbol": "mountain",
+		"reshuffle": false
+	},
+	{
+		"id": "00006",
+		"AWA": -1,
+		"SPI": 0,
+		"FIT": 0,
+		"FOC": -1,
+		"symbol": "mountain",
+		"reshuffle": false
+	},
+	{
+		"id": "00007",
+		"AWA": 0,
+		"SPI": -1,
+		"FIT": -1,
+		"FOC": 0,
+		"symbol": "mountain",
+		"reshuffle": false
+	},
+	{
+		"id": "00008",
+		"AWA": 1,
+		"SPI": -1,
+		"FIT": -1,
+		"FOC": 1,
+		"symbol": "mountain",
+		"reshuffle": false
+	},
+	{
+		"id": "00009",
+		"AWA": -1,
+		"SPI": 0,
+		"FIT": -1,
+		"FOC": 0,
+		"symbol": "crest",
+		"reshuffle": false
+	},
+	{
+		"id": "00010",
+		"AWA": 0,
+		"SPI": 0,
+		"FIT": 1,
+		"FOC": -1,
+		"symbol": "crest",
+		"reshuffle": false
+	},
+	{
+		"id": "00011",
+		"AWA": 0,
+		"SPI": -1,
+		"FIT": 0,
+		"FOC": 1,
+		"symbol": "crest",
+		"reshuffle": false
+	},
+	{
+		"id": "00012",
+		"AWA": 1,
+		"SPI": 1,
+		"FIT": 0,
+		"FOC": -2,
+		"symbol": "crest",
+		"reshuffle": true
+	},
+	{
+		"id": "00013",
+		"AWA": -1,
+		"SPI": -1,
+		"FIT": 0,
+		"FOC": 0,
+		"symbol": "crest",
+		"reshuffle": false
+	},
+	{
+		"id": "00014",
+		"AWA": -1,
+		"SPI": 0,
+		"FIT": 0,
+		"FOC": 1,
+		"symbol": "crest",
+		"reshuffle": false
+	},
+	{
+		"id": "00015",
+		"AWA": 1,
+		"SPI": -2,
+		"FIT": 1,
+		"FOC": 0,
+		"symbol": "crest",
+		"reshuffle": true
+	},
+	{
+		"id": "00016",
+		"AWA": 0,
+		"SPI": 1,
+		"FIT": -1,
+		"FOC": 0,
+		"symbol": "crest",
+		"reshuffle": false
+	},
+	{
+		"id": "00017",
+		"AWA": 0,
+		"SPI": -1,
+		"FIT": 0,
+		"FOC": -1,
+		"symbol": "sun",
+		"reshuffle": false
+	},
+	{
+		"id": "00018",
+		"AWA": 0,
+		"SPI": 1,
+		"FIT": -2,
+		"FOC": 1,
+		"symbol": "sun",
+		"reshuffle": true
+	},
+	{
+		"id": "00019",
+		"AWA": 0,
+		"SPI": 0,
+		"FIT": -1,
+		"FOC": -1,
+		"symbol": "sun",
+		"reshuffle": false
+	},
+	{
+		"id": "00020",
+		"AWA": -2,
+		"SPI": 0,
+		"FIT": 1,
+		"FOC": 1,
+		"symbol": "sun",
+		"reshuffle": true
+	},
+	{
+		"id": "00021",
+		"AWA": -1,
+		"SPI": 1,
+		"FIT": 0,
+		"FOC": 0,
+		"symbol": "sun",
+		"reshuffle": false
+	},
+	{
+		"id": "00022",
+		"AWA": 0,
+		"SPI": -1,
+		"FIT": 1,
+		"FOC": 0,
+		"symbol": "sun",
+		"reshuffle": false
+	},
+	{
+		"id": "00023",
+		"AWA": 1,
+		"SPI": 0,
+		"FIT": 0,
+		"FOC": -1,
+		"symbol": "sun",
+		"reshuffle": false
+	},
+	{
+		"id": "00024",
+		"AWA": -1,
+		"SPI": 0,
+		"FIT": 1,
+		"FOC": 0,
+		"symbol": "sun",
+		"reshuffle": false
+	}
+]
