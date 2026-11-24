@@ -20,8 +20,10 @@ export default function App() {
 	const current = 'id' in screen ? campaigns.find((c) => c.id === screen.id) : undefined
 	if (current?.game) migrate(current.game)
 	const update = useCallback((c: Campaign) => {
-		saveCampaign(c)
-		setCampaigns(loadAll())
+		const ok = saveCampaign(c)
+		// keep playing from memory even if the browser couldn't store it
+		setCampaigns(ok ? loadAll() : (prev) => [c, ...prev.filter((x) => x.id !== c.id)])
+		if (!ok) say('Your browser’s storage is full, so this isn’t being saved. Delete an old campaign to free space.')
 	}, [])
 	useEffect(() => {
 		try {
@@ -124,10 +126,12 @@ export default function App() {
 				open={(c) => setScreen(c.tutorial ? { s: 'day', id: c.id } : { s: 'campaign', id: c.id })}
 				create={() => setScreen({ s: 'new' })}
 				tutorial={(name) => {
-					const old = loadAll().filter((x) => x.tutorial)
-					for (const o of old) deleteCampaign(o.id)
-					const c = tutorialCampaign(name)
-					startDay(c)
+					try {
+						for (const o of loadAll().filter((x) => x.tutorial)) deleteCampaign(o.id)
+						startDay(tutorialCampaign(name))
+					} catch (e) {
+						say(`The tutorial couldn’t start: ${e instanceof Error ? e.message : String(e)}`)
+					}
 				}}
 				remove={(c) => {
 					deleteCampaign(c.id)

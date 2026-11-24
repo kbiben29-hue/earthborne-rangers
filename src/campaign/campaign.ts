@@ -197,18 +197,30 @@ export function loadAll(): Campaign[] {
 		return []
 	}
 }
-export function saveCampaign(c: Campaign) {
-	const all = loadAll().filter((x) => x.id !== c.id)
+/** Saves a campaign; returns false when the browser's storage is full even after trimming. */
+export function saveCampaign(c: Campaign): boolean {
+	const all = loadAll().filter((x) => x.id !== c.id && !(c.tutorial && x.tutorial))
 	all.unshift(c)
-	try {
-		localStorage.setItem(KEY, JSON.stringify(all))
-	} catch {
-		// storage full: drop the in-progress game history of older campaigns
-		for (const x of all.slice(1)) x.game = null
+	const tries: (() => void)[] = [
+		() => {},
+		// storage full: drop finished tutorials and the in-progress games of other campaigns
+		() => {
+			for (let i = all.length - 1; i > 0; i--) if (all[i].tutorial) all.splice(i, 1)
+			for (const x of all.slice(1)) x.game = null
+		},
+		// still full: shorten the logs
+		() => {
+			for (const x of all) if (x.game) x.game.log = x.game.log.slice(-150)
+		},
+	]
+	for (const t of tries) {
+		t()
 		try {
 			localStorage.setItem(KEY, JSON.stringify(all))
+			return true
 		} catch {}
 	}
+	return false
 }
 export function deleteCampaign(id: string) {
 	try {
