@@ -1,0 +1,60 @@
+{
+ "https://earthborne-rangers.s3.eu-west-3.amazonaws.com/cards/00_Challenge_Deck/00000.jpg": {
+  "status": 403,
+  "type": "application/xml",
+  "bytes": 263,
+  "head": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>AccessDenied</Code><Message>Access Denied</Message><RequestId>WP6MADJ31R5T5DDG</RequestId><HostId>xz2UoqEuDVTczdWA8Y52GxsdsSv2XCVnkOL3vz0ooAHYNKRTWx3g7Y0uEG1RztLRbiwywYghpJIoXqZ7a7NMx1gD2Fbj+S5+</HostId></Error>"
+ },
+ "https://earthborne-rangers-bucket.s3.eu-west-3.amazonaws.com/cards/00_Challenge_Deck/00000.jpg": {
+  "status": 403,
+  "type": "application/xml",
+  "bytes": 243,
+  "head": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>AccessDenied</Code><Message>Access Denied</Message><RequestId>WP6K7MFFT9P80KG3</RequestId><HostId>egkPjHoFsMAKAs6FXIH9/oybYAVWkBTaAMZFkyVZ+KPjZ/7U5KFiIZQSLLXbR4PaVdbg5bvdkro=</HostId></Error>"
+ },
+ "https://earthborne-rangers.s3.eu-west-3.amazonaws.com/background-and-tokens/harm.png": {
+  "status": 200,
+  "type": "image/png",
+  "bytes": 86819,
+  "head": "�PNG\r\n\u001a\n\u0000\u0000\u0000\rIHDR\u0000\u0000\u0001`\u0000\u0000\u0001`\b\u0006\u0000\u0000\u0000�a�L\u0000\u0000\u0000\tpHYs\u0000\u0000.#\u0000\u0000.#\u0001x�?v\u0000\u0000\n�iTXtXML:com.adobe.xmp\u0000\u0000\u0000\u0000\u0000<?xpacket begin=\"﻿\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?> <x:xmpmeta xmlns:x=\"adobe:ns:meta/\" x:xmptk=\"Adobe XMP Core 6.0-c006 79.dabacbb, 2021/04/14-00:39:44        \"> <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rd"
+ },
+ "https://earthborne-rangers-bucket.s3.eu-west-3.amazonaws.com/cards/02001.jpg": {
+  "status": 403,
+  "type": "application/xml",
+  "bytes": 243,
+  "head": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>AccessDenied</Code><Message>Access Denied</Message><RequestId>GRWSS0PYKH1AJQ3C</RequestId><HostId>U1JLSgjWO6BYyTORxumvRulYH0a6jZ9JWiLrBvBclXqExlkockOf8l3a1KT/OihpsQjA4WVwHkg=</HostId></Error>"
+ },
+ "https://dragncards.com/be/api/plugins": {
+  "status": 200,
+  "type": "application/json; charset=utf-8",
+  "bytes": 10561,
+  "head": "{\"data\":[{\"announcements\":[\"2026-10-10: Fix: Update cerebro image urls to new location.\",\"2026-10-05: Feat: Add Jessica Jones and Luke Cage Hero Packs.\",\"2026-08-23: Fix: mc4db deck import (Ctrl+K) now also loads the hero's obligation and nemesis set.\",\"2026-08-15: Feat: Add Fear No Evil encounter c"
+ },
+ "found": {
+  "id": 5,
+  "name": "Earthborne Rangers"
+ },
+ "https://dragncards.com/be/api/plugins/5": {
+  "status": 200,
+  "type": null,
+  "bytes": 222754,
+  "head": "\"H4sIAAAAAAAAA+y923LjSJYg+Csobs5W1Y5SIi7UJR66l5KokDolkUUyIiomWkaDSEhEiwLYACilKltm/bCPazYvZba7ZjM2L/sRY7t/0z+w8wnrl3MAd4fjJjAyI6szrboVBODHj7sfP3c//lPHX3Te9XY69+6jN1t4d513P3XWSzf2YvqvkZssT9xowX4sPf9+mXTedazef+jsdFburbciv/zFu3X62etOZ+wG9140ojDKW0XCh7Sddxd58bKiDXxEvp9G7hN9XPZ5wr95JZ+vV5t7P7gmwySvBm6ULG/"
+ },
+ "https://dragncards.com/be/api/plugins/visible/5": {
+  "status": 200,
+  "type": "application/json; charset=utf-8",
+  "bytes": 10561,
+  "head": "{\"data\":[{\"announcements\":[\"2026-10-10: Fix: Update cerebro image urls to new location.\",\"2026-10-05: Feat: Add Jessica Jones and Luke Cage Hero Packs.\",\"2026-08-23: Fix: mc4db deck import (Ctrl+K) now also loads the hero's obligation and nemesis set.\",\"2026-08-15: Feat: Add Fear No Evil encounter c"
+ },
+ "https://dragncards.com/be/api/plugins/info/5": {
+  "status": 404,
+  "type": "application/json; charset=utf-8",
+  "bytes": 11,
+  "head": "\"Not Found\""
+ },
+ "https://dragncards.com/be/api/plugins/5/card_db": {
+  "status": 404,
+  "type": "application/json; charset=utf-8",
+  "bytes": 11,
+  "head": "\"Not Found\""
+ }
+}
