@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMotion } from './motion'
 import { ASPECTS, card, CARDS, CHALLENGE, MISSIONS_CORE, SETS, TERRAINS, type Aspect } from '../data/data'
 import {
 	attachments,
@@ -9,6 +10,7 @@ import {
 	commonTargetOk,
 	costOf,
 	equipUsed,
+	isResponse,
 	has,
 	iconsFor,
 	nameOf,
@@ -57,9 +59,13 @@ export function Board({
 }) {
 	const [sel, setSel] = useState<Sel>(null)
 	const [pick, setPick] = useState<Pick>(null)
+	const [bubble, setBubble] = useState<{ uid: number; x: number; y: number } | null>(null)
 	const [me, setMe] = useState(0)
 	const [manual, setManual] = useState(() => localStorage.getItem('earthborne.manual') === '1')
 	const [panel, setPanel] = useState<'none' | 'log' | 'menu' | 'search' | 'map'>('none')
+	const [drag, setDrag] = useState<{ index: number; x: number; y: number } | null>(null)
+	const boardRef = useRef<HTMLDivElement>(null)
+	useMotion(boardRef, g)
 	const head = g.queue[0]
 
 	useEffect(() => {
@@ -76,6 +82,7 @@ export function Board({
 			if (e.key === 'Escape') {
 				setSel(null)
 				setPick(null)
+				setBubble(null)
 				setPanel('none')
 			}
 		}
@@ -83,8 +90,32 @@ export function Board({
 		return () => window.removeEventListener('keydown', k)
 	}, [])
 
+	const R = g.rangers[me]
+	const turnWhy = canTakeTurn(g, me)
+	const myTurnOk = turnWhy == null || turnWhy === 'role'
+	const useRole = turnWhy === 'role'
 	const choosing = head?.kind === 'choose' ? head : null
-	const tap = (uid: number) => {
+	const idle = !head && g.phase === 'turns'
+
+	// What a tap on a card in play can do right now
+	const cardActions = (uid: number) => {
+		const out: { label: string; aspect?: Aspect; run: () => void }[] = []
+		if (!idle || !g.inst[uid]) return out
+		for (const t of availableTests(g, me).filter((t) => t.src === uid))
+			out.push({ label: t.name, aspect: t.aspect, run: () => dispatch({ t: 'test', ranger: me, src: uid, test: t.test, useRole }) })
+		for (const t of COMMON_TESTS.filter((t) => t.targets && commonTargetOk(g, t.key, uid)))
+			out.push({ label: t.name, aspect: t.aspect, run: () => dispatch({ t: 'test', ranger: me, src: null, test: t.key, target: uid, useRole }) })
+		P(g, uid).abilities.forEach((a, i) => {
+			if (a.kind !== 'exhaust' || /^Exhaust[^:]*: When (?:a Ranger|you) performs?/i.test(a.text)) return
+			const inst = g.inst[uid]
+			if (inst.exhausted || (inst.zone === 'player' && inst.owner !== me && inst.kind !== 'path')) return
+			out.push({ label: a.text.replace(/^Exhaust(?: \(use [^)]*\))?:\s*/i, '').slice(0, 42), run: () => dispatch({ t: 'ability', ranger: me, uid, line: i }) })
+		})
+		return out
+	}
+	const usable = (uid: number) => idle && myTurnOk && cardActions(uid).some((a) => !a.aspect || R.energy[a.aspect] > 0)
+
+	const tap = (uid: number, e: React.MouseEvent) => {
 		if (choosing && choosing.max === 1 && choosing.options.includes(uid)) {
 			dispatch({ t: 'choose', uids: [uid] })
 			return
@@ -96,31 +127,95 @@ export function Board({
 			}
 			return
 		}
+		const acts = cardActions(uid)
+		if (acts.length) {
+			const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+			setBubble({ uid, x: r.left + r.width / 2, y: r.top })
+			setSel(null)
+		} else {
+			setBubble(null)
+			setSel({ kind: 'inst', uid })
+		}
+	}
+	const inspect = (uid: number, e?: React.MouseEvent) => {
+		e?.preventDefault()
+		setBubble(null)
 		setSel({ kind: 'inst', uid })
 	}
+
 	const tile = (uid: number, small = false) => {
 		const inst = g.inst[uid]
 		if (!inst) return null
 		const att = attachments(g, uid)
+		const glow = choosing?.options.includes(uid) ? 'pick' : pick?.ok(uid) ? 'pick' : usable(uid) ? 'use' : ''
 		return (
-			<div className="stack" key={uid}>
-				<CardTile g={g} inst={inst} small={small} onClick={() => tap(uid)} selected={sel?.kind === 'inst' && sel.uid === uid} pickable={(!!pick && pick.ok(uid)) || !!choosing?.options.includes(uid)} />
+			<div className={`stack ${small ? 'small' : ''}`} key={uid}>
+				<div onContextMenu={(e) => inspect(uid, e)} className={`glow-${glow}`}>
+					<CardTile g={g} inst={inst} small={small} onClick={(e) => tap(uid, e)} selected={(sel?.kind === 'inst' && sel.uid === uid) || bubble?.uid === uid} pickable={glow === 'pick'} />
+				</div>
 				{att.map((a) => (
-					<div className="attached" key={a.uid}>
-						<CardTile g={g} inst={a} small onClick={() => tap(a.uid)} pickable={!!pick && pick.ok(a.uid)} />
+					<div className="attached" key={a.uid} onContextMenu={(e) => inspect(a.uid, e)}>
+						<CardTile g={g} inst={a} small onClick={(e) => tap(a.uid, e)} pickable={!!choosing?.options.includes(a.uid) || (!!pick && pick.ok(a.uid))} />
 					</div>
 				))}
 			</div>
 		)
 	}
 
-	const R = g.rangers[me]
-	const turnWhy = canTakeTurn(g, me)
-	const myTurnOk = turnWhy == null || turnWhy === 'role'
-	const useRole = turnWhy === 'role'
+	// ----- playing from hand
+	const playable = (r: number, i: number): boolean => {
+		const Rr = g.rangers[r]
+		const id = Rr.hand[i]
+		if (!id || !idle) return false
+		const c = card(id)
+		if (c.type === 'Attribute') return false
+		const resp = isResponse(id)
+		const why = canTakeTurn(g, r)
+		if (!resp && why != null && why !== 'role') return false
+		const cost = costOf(id)
+		return Rr.energy[c.aspect ?? 'AWA'] >= (cost === 'X' ? 0 : cost)
+	}
+	const playHand = (r: number, i: number) => {
+		const id = g.rangers[r].hand[i]
+		const c = card(id)
+		const cost = costOf(id)
+		const x = cost === 'X' ? Number(prompt(`Pay how much for ${c.name}? (X)`, '1') || '0') : undefined
+		if (c.type === 'Attachment' && !/^Search the path deck and discard for/i.test((c.text ?? '').replace(/<[^>]+>/g, ''))) {
+			setPick({ why: `Attach ${c.name}: tap the card to attach it to`, ok: (u) => !!g.inst[u], done: (u) => dispatch({ t: 'play', ranger: r, hand: i, target: u, x, useRole }) })
+			return
+		}
+		dispatch({ t: 'play', ranger: r, hand: i, x, useRole })
+	}
+	const onHandDown = (i: number, e: React.PointerEvent) => {
+		if (e.button !== 0) return
+		const sx = e.clientX
+		const sy = e.clientY
+		let moved = false
+		const move = (ev: PointerEvent) => {
+			if (!moved && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 14) return
+			moved = true
+			setDrag({ index: i, x: ev.clientX, y: ev.clientY })
+		}
+		const up = (ev: PointerEvent) => {
+			window.removeEventListener('pointermove', move)
+			window.removeEventListener('pointerup', up)
+			setDrag(null)
+			const handTop = document.querySelector('.handbar')?.getBoundingClientRect().top ?? 9999
+			if (moved && ev.clientY < handTop - 20) {
+				if (playable(me, i)) playHand(me, i)
+				else dispatch({ t: 'play', ranger: me, hand: i, useRole })
+			} else if (!moved) {
+				if (playable(me, i)) playHand(me, i)
+				else setSel({ kind: 'hand', ranger: me, index: i })
+			}
+		}
+		window.addEventListener('pointermove', move)
+		window.addEventListener('pointerup', up)
+	}
 
 	const startCommon = (key: string) => {
 		const t = COMMON_TESTS.find((x) => x.key === key)!
+		setBubble(null)
 		if (!t.targets) {
 			dispatch({ t: 'test', ranger: me, src: null, test: key, useRole })
 			return
@@ -133,72 +228,77 @@ export function Board({
 		})
 	}
 
-	const surroundings = [...g.weather, g.location, ...g.missions].filter((u) => g.inst[u])
+	const weather = g.weather.filter((u) => g.inst[u])
+	const missions = g.missions.filter((u) => g.inst[u])
 	const along = zoneCards(g, 'along').map((i) => i.uid)
+	const banner =
+		g.phase === 'turns' && !head
+			? g.rangers.every((r) => r.rested)
+				? ''
+				: `${R.name}'s turn${useRole ? ' (exhausts role)' : ''}`
+			: PHASE[g.phase]
+	const lastPath = g.pathDiscard[g.pathDiscard.length - 1]
 
 	return (
-		<div className={`board ${pick ? 'picking' : ''}`}>
+		<div className={`board tabletop ${pick || choosing ? 'picking' : ''}`} ref={boardRef} onClick={(e) => e.target === e.currentTarget && setBubble(null)}>
 			<header className="topbar">
-				<button className="ghost" onClick={() => setPanel(panel === 'menu' ? 'none' : 'menu')}>☰</button>
+				<button className="ghost" onClick={() => setPanel(panel === 'menu' ? 'none' : 'menu')} title="Menu">
+					☰
+				</button>
 				<div className="title">
-					<b>Day {g.day}</b> · Round {g.round} · <span className="phase">{PHASE[g.phase]}</span>
+					<b>Day {g.day}</b> · Round {g.round}
 				</div>
-				<div className="decks">
-					<span title="Path deck / discard">Path {g.pathDeck.length}/{g.pathDiscard.length}</span>
-					<span title="Challenge deck">Challenge {g.challenge.length}</span>
-					<span title="Terrain">{TERRAINS[g.terrain] ?? g.terrain}</span>
-				</div>
-				<button className="ghost" onClick={undo} disabled={!canUndo} title="Undo">↶</button>
-				<button className="ghost" onClick={() => setPanel(panel === 'log' ? 'none' : 'log')}>Log</button>
+				<div className="phase-pill">{banner}</div>
+				<button className="ghost" onClick={undo} disabled={!canUndo} title="Undo">
+					↶
+				</button>
+				<button className="ghost" onClick={() => setPanel(panel === 'log' ? 'none' : 'log')} title="Log">
+					☷
+				</button>
 			</header>
 
-			{pick && (
-				<div className="pickbar">
-					{pick.why} <button onClick={() => setPick(null)}>Cancel</button>
-				</div>
-			)}
-
-			<main className="table">
-				<section className="zone surroundings">
-					<h3>The surroundings</h3>
-					<div className="row">{surroundings.map((u) => tile(u))}</div>
+			<main className="felt" onClick={(e) => e.target === e.currentTarget && setBubble(null)}>
+				<section className="sky">
+					<div className="row">{weather.map((u) => tile(u))}</div>
+					<div className="loc">{tile(g.location)}</div>
+					<div className="row">{missions.map((u) => tile(u, true))}</div>
+					<div className="piles">
+						<Pile label="Path" n={g.pathDeck.length} back="back-path.jpg" anchor="path-deck" onClick={() => setPanel('search')} />
+						<Pile label="Discard" n={g.pathDiscard.length} face={lastPath} anchor="path-discard" />
+						<Pile label="Challenge" n={g.challenge.length} back="back-challenge.jpg" anchor="challenge" />
+					</div>
 				</section>
-				<section className="zone along">
-					<h3>Along the way</h3>
-					<div className="row">{along.length ? along.map((u) => tile(u)) : <p className="empty">Nothing along the way.</p>}</div>
+				<section className="along" data-drop="play">
+					<span className="zone-label">Along the way</span>
+					<div className="row center">{along.map((u) => tile(u))}</div>
 				</section>
-				<section className="rangers">
+				<section className="mats">
 					{g.rangers.map((r, k) => (
-						<div key={k} className={`ranger-area r${k} ${k === me ? 'me' : ''} ${r.rested ? 'rested' : ''}`} onClick={() => setMe(k)}>
-							<div className="ranger-head">
+						<div key={k} className={`mat r${k} ${k === me ? 'me' : ''} ${r.rested ? 'rested' : ''}`} onClick={() => k !== me && setMe(k)}>
+							<div className="mat-head">
 								<span className={`chip r${k}`}>{r.name}</span>
-								{k === g.lead && <span className="lead" title="Lead Ranger">lead</span>}
+								{k === g.lead && <span className="lead">lead</span>}
 								{r.rested && <span className="lead">rested</span>}
 								<span className="energy">
 									{ASPECTS.map((a) => (
-										<span key={a} className={`en en-${a}`} title={`${ASPECT_NAME[a]} energy (aspect ${r.aspects[a]})`}>
+										<span key={a} className={`en en-${a}`} title={`${ASPECT_NAME[a]}: ${r.energy[a]} of ${r.aspects[a]}`}>
 											{r.energy[a]}
 											<small>{a}</small>
 										</span>
 									))}
 								</span>
-								<span className="counts">
-									<span title="Ranger deck">🂠 {r.deck.length}</span>
-									<span title="Fatigue stack">😮‍💨 {r.fatigue.length}</span>
-									<span title="Discard">♻ {r.discard.length}</span>
-									<span title="Injuries" className={r.injuries ? 'hurt' : ''}>✚ {r.injuries}</span>
-								</span>
+								{r.injuries > 0 && <span className="hurt">✚ {r.injuries}</span>}
 							</div>
-							<div className="ranger-body">
-								<div className="sub">
-									<h4>Within reach</h4>
-									<div className="row">{zoneCards(g, 'reach', k).map((i) => tile(i.uid))}</div>
+							<div className="mat-body">
+								<div className="gear">{[r.roleUid, ...zoneCards(g, 'player', k).filter((i) => i.uid !== r.roleUid).map((i) => i.uid)].map((u) => tile(u, true))}</div>
+								<div className="reach" data-drop="play">
+									{zoneCards(g, 'reach', k).map((i) => tile(i.uid))}
+									{!zoneCards(g, 'reach', k).length && <span className="zone-label">within reach</span>}
 								</div>
-								<div className="sub player">
-									<h4>
-										Player area <small>({equipUsed(g, k)}/5 equip)</small>
-									</h4>
-									<div className="row">{[r.roleUid, ...zoneCards(g, 'player', k).filter((i) => i.uid !== r.roleUid).map((i) => i.uid)].map((u) => tile(u, true))}</div>
+								<div className="piles small">
+									<Pile label="Deck" n={r.deck.length} back="back-player.jpg" anchor={`deck-${k}`} />
+									<Pile label="Fatigue" n={r.fatigue.length} back="back-player.jpg" anchor={`fatigue-${k}`} tilt />
+									<Pile label="Discard" n={r.discard.length} face={r.discard[r.discard.length - 1]} anchor={`discard-${k}`} />
 								</div>
 							</div>
 						</div>
@@ -207,65 +307,111 @@ export function Board({
 			</main>
 
 			<section className="handbar">
-				<div className="mobile-only">
-					<LastTest g={g} />
-				</div>
-				<div className="hand-head">
-					<span className={`chip r${me}`}>{R.name}'s hand</span>
+				<div className="dock">
 					{g.rangers.length > 1 && (
 						<span className="switch">
 							{g.rangers.map((r, k) => (
-								<button key={k} className={k === me ? 'on' : ''} onClick={() => setMe(k)}>
+								<button key={k} className={`chip-btn r${k} ${k === me ? 'on' : ''}`} onClick={() => setMe(k)}>
 									{r.name}
 								</button>
 							))}
 						</span>
 					)}
-					{g.phase === 'turns' && !head && (
+					{idle && (
 						<span className="acts">
 							{COMMON_TESTS.map((t) => (
-								<button key={t.key} disabled={!myTurnOk || R.energy[t.aspect] < 1} onClick={() => startCommon(t.key)} title={t.text}>
-									<b className={`asp-${t.aspect}`}>{t.aspect}</b> {t.name}
+								<button key={t.key} className={`act act-${t.aspect}`} disabled={!myTurnOk || R.energy[t.aspect] < 1} onClick={() => startCommon(t.key)} title={t.text}>
+									<b>{t.aspect}</b>
+									{t.name}
 								</button>
 							))}
-							<button disabled={R.rested} onClick={() => dispatch({ t: 'rest', ranger: me })} className="rest">
-								Rest
+							<button disabled={R.rested} onClick={() => dispatch({ t: 'rest', ranger: me })} className="act rest" title="Done for this round">
+								<b>✓</b>Rest
 							</button>
 						</span>
 					)}
-					{useRole && !head && <span className="hint">Next turn exhausts {R.name}'s role.</span>}
-					{turnWhy && turnWhy !== 'role' && g.phase === 'turns' && !head && <span className="hint">{turnWhy}</span>}
+					{turnWhy && turnWhy !== 'role' && idle && <span className="hint">{turnWhy}</span>}
 				</div>
-				<div className="hand">
-					{R.hand.map((id, i) => (
-						<HandCard key={i + id} id={id} onClick={() => setSel({ kind: 'hand', ranger: me, index: i })} selected={sel?.kind === 'hand' && sel.ranger === me && sel.index === i} />
-					))}
+				<div className="hand fan" data-anchor={`hand-${me}`}>
+					{R.hand.map((id, i) => {
+						const n = R.hand.length
+						const mid = (n - 1) / 2
+						const can = playable(me, i)
+						return (
+							<div
+								key={i + id}
+								className={`hcard ${can ? 'glow-play' : ''} ${drag?.index === i ? 'dragging' : ''}`}
+								style={{ ['--r' as string]: `${(i - mid) * Math.min(4, 24 / n)}deg`, ['--y' as string]: `${Math.abs(i - mid) ** 1.6 * 2}px` }}
+								onPointerDown={(e) => onHandDown(i, e)}
+								onContextMenu={(e) => {
+									e.preventDefault()
+									setSel({ kind: 'hand', ranger: me, index: i })
+								}}
+							>
+								<img src={cardImg(id)} alt={card(id).name} draggable={false} />
+							</div>
+						)
+					})}
 					{!R.hand.length && <p className="empty">No cards in hand.</p>}
 				</div>
+				{drag && R.hand[drag.index] && <img className="drag-ghost" src={cardImg(R.hand[drag.index])} style={{ left: drag.x, top: drag.y }} alt="" />}
 			</section>
 
-			<aside className="side">
+			{(pick || (choosing && choosing.max === 1)) && (
+				<div className="aimbar">
+					{pick ? pick.why : `${choosing!.title}: ${choosing!.text}`}
+					{pick && <button onClick={() => setPick(null)}>Cancel</button>}
+				</div>
+			)}
+
+			<div className="tray">
 				<LastTest g={g} />
-				{head && <PromptPanel g={g} head={head} dispatch={dispatch} setPick={setPick} onDayOver={onDayOver} hooks={hooks} />}
-				{sel && (
-					<Viewer
-						g={g}
-						sel={sel}
-						me={me}
-						manual={manual}
-						dispatch={(it) => {
-							const e = dispatch(it)
-							if (!e) setSel(null)
-							return e
-						}}
-						setPick={setPick}
-						close={() => setSel(null)}
-						useRole={useRole}
-						turnOk={myTurnOk}
-					/>
-				)}
-				{!head && !sel && <Help g={g} me={me} />}
-			</aside>
+				{head && !(choosing && choosing.max === 1) && <PromptPanel g={g} head={head} dispatch={dispatch} setPick={setPick} onDayOver={onDayOver} hooks={hooks} />}
+			</div>
+
+			{bubble && g.inst[bubble.uid] && (
+				<div className="bubble" style={{ left: bubble.x, top: bubble.y }} onClick={(e) => e.stopPropagation()}>
+					<b>{nameOf(g, bubble.uid)}</b>
+					{cardActions(bubble.uid).map((a, k) => (
+						<button
+							key={k}
+							disabled={(!!a.aspect && R.energy[a.aspect] < 1) || !myTurnOk}
+							onClick={() => {
+								setBubble(null)
+								a.run()
+							}}
+						>
+							{a.aspect && <span className={`asp-${a.aspect}`}>{a.aspect} </span>}
+							{a.label}
+						</button>
+					))}
+					<button className="ghost" onClick={() => inspect(bubble.uid)}>
+						Look closer…
+					</button>
+				</div>
+			)}
+
+			{sel && (
+				<div className="drawer" onClick={() => setSel(null)}>
+					<div className="drawer-body" onClick={(e) => e.stopPropagation()}>
+						<Viewer
+							g={g}
+							sel={sel}
+							me={me}
+							manual={manual}
+							dispatch={(it) => {
+								const e = dispatch(it)
+								if (!e) setSel(null)
+								return e
+							}}
+							setPick={setPick}
+							close={() => setSel(null)}
+							useRole={useRole}
+							turnOk={myTurnOk}
+						/>
+					</div>
+				</div>
+			)}
 
 			{panel === 'log' && (
 				<div className="drawer" onClick={() => setPanel('none')}>
@@ -283,18 +429,7 @@ export function Board({
 				</div>
 			)}
 			{panel === 'menu' && (
-				<Menu
-					g={g}
-					me={me}
-					manual={manual}
-					setManual={setManual}
-					dispatch={dispatch}
-					close={() => setPanel('none')}
-					openSearch={() => setPanel('search')}
-					openMap={() => setPanel('map')}
-					onExit={onExit}
-					hooks={hooks}
-				/>
+				<Menu g={g} me={me} manual={manual} setManual={setManual} dispatch={dispatch} close={() => setPanel('none')} openSearch={() => setPanel('search')} openMap={() => setPanel('map')} onExit={onExit} hooks={hooks} />
 			)}
 			{panel === 'search' && <Search g={g} me={me} dispatch={dispatch} close={() => setPanel('none')} />}
 			{panel === 'map' && (
@@ -308,34 +443,20 @@ export function Board({
 	)
 }
 
-const PHASE: Record<Game['phase'], string> = { setup: 'Setup', path: 'Path cards', turns: 'Ranger turns', travel: 'Travel', refresh: 'Refresh', over: 'Day over' }
-
-// ------------------------------------------------------------------ help
-
-function Help({ g, me }: { g: Game; me: number }) {
-	const R = g.rangers[me]
+function Pile({ label, n, back, face, anchor, onClick, tilt }: { label: string; n: number; back?: string; face?: string; anchor: string; onClick?: () => void; tilt?: boolean }) {
 	return (
-		<div className="panel help">
-			<h3>{g.phase === 'turns' ? `${R.name}'s options` : PHASE[g.phase]}</h3>
-			{g.phase === 'turns' && (
-				<ul>
-					<li>
-						<b>Perform a test</b>: use the common test buttons above your hand, or tap a card in play to see its tests.
-					</li>
-					<li>
-						<b>Play a card</b>: tap a card in your hand.
-					</li>
-					<li>
-						<b>Rest</b> when you're done for the round. When every Ranger has rested, you may travel.
-					</li>
-				</ul>
-			)}
-			<p className="sub">Tap any card to see it large. Cards between you and what you interact with fatigue you; obstacles block the way.</p>
+		<div className={`pile ${tilt ? 'tilt' : ''}`} onClick={onClick} title={`${label}: ${n}`}>
+			<div className="pile-card" data-anchor={anchor}>
+				{n > 0 ? face ? <img src={cardImg(face)} alt="" /> : <img src={imgUrl(back!)} alt="" /> : <div className="pile-empty" />}
+				{n > 1 && <div className="pile-shadow" />}
+				<span className="pile-n">{n}</span>
+			</div>
+			<span className="pile-label">{label}</span>
 		</div>
 	)
 }
 
-// ------------------------------------------------------------------ prompts
+const PHASE: Record<Game['phase'], string> = { setup: 'Setting up', path: 'Path cards', turns: 'Ranger turns', travel: 'Travel', refresh: 'Refresh', over: 'Day over' }
 
 function PromptPanel({ g, head, dispatch, setPick, onDayOver, hooks }: { g: Game; head: Prompt; dispatch: Dispatch; setPick: (p: Pick) => void; onDayOver: () => void; hooks: CampaignHooks }) {
 	switch (head.kind) {

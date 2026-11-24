@@ -19,7 +19,7 @@ export function CardTile({
 }: {
 	g: Game
 	inst: Inst
-	onClick?: () => void
+	onClick?: (e: React.MouseEvent) => void
 	selected?: boolean
 	pickable?: boolean
 	small?: boolean
@@ -34,6 +34,7 @@ export function CardTile({
 			className={`tile ${small ? 'small' : ''} ${inst.exhausted ? 'exhausted' : ''} ${selected ? 'selected' : ''} ${pickable ? 'pickable' : ''} ${landscape ? 'land' : ''}`}
 			onClick={onClick}
 			title={nameOf(g, inst.uid)}
+			data-uid={inst.uid}
 		>
 			<img src={inst.faceDown ? imgUrl(c.back === 'path' ? 'back-path.jpg' : 'back-player.jpg') : cardImg(inst.id, inst.side)} alt={nameOf(g, inst.uid)} loading="lazy" draggable={false} />
 			<span className="tile-name">{nameOf(g, inst.uid)}</span>

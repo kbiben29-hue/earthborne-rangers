@@ -38,7 +38,7 @@ npm run data    # scripts/build-game-data.mjs → src/data/game.json
   what can be added to a test (role/response dodges, greaves, gear boosts, Memlev poles, responses,
   Versatile); `iconsFor()` handles Vigilant-style attributes.
 - `src/campaign/campaign.ts` — campaign tracker, Ranger builder rules, `finishDay()`, localStorage.
-- `src/ui/` — `Board.tsx` (table, prompts, card viewer, menu, search), `Screens.tsx` (home, new
+- `src/ui/` — `Board.tsx` (Holodeck-style table: felt, Ranger mats with piles, fanned hand with green glow on playable cards, click or drag to play, tap a card for its action bubble, right-click / "Look closer" to inspect; prompts float in `.tray`), `motion.ts` (cards fly between piles and zones, keyed by `data-uid` / `data-anchor`), `Screens.tsx` (home, new
   campaign, builder, campaign tracker, deck editor), `Card.tsx`, `styles.css`.
 
 ## Hard rules
