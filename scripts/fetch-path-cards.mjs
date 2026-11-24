@@ -1,149 +1,81 @@
 #!/usr/bin/env node
-// Downloads the non-Ranger cards (challenge deck, path sets, weather, locations, missions)
-// the way the DragnCards Earthborne plugin (github.com/seastan/dragncards-ebr-plugin) shows them:
-//   - card IDs come from data/dragncards/prebuilt-decks.json (copied from the plugin)
-//   - pictures come from the plugin author's public S3 storage
-//   - if DragnCards' API hands out the plugin's card database, it is saved too
+// Downloads every Earthborne Rangers card the way DragnCards has them:
+//   - the card database of DragnCards' Earthborne plugin (id 5), typed up by the plugin's authors
+//     (repo: github.com/filippopence/dragncards-ebr-plugin), including path, location, weather,
+//     mission and challenge cards that RangersDB doesn't have
+//   - the card pictures from the plugin's public image storage
+// Writes data/dragncards/card-db.json, data/dragncards/game-def.json and images/<file>.
 // Runs in the "Fetch path cards" GitHub Action (needs internet; Node 20+).
 
 import fs from 'node:fs'
 import path from 'node:path'
+import zlib from 'node:zlib'
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const outDir = path.join(root, 'data', 'dragncards')
 const imgDir = path.join(root, 'images')
 fs.mkdirSync(outDir, { recursive: true })
 fs.mkdirSync(imgDir, { recursive: true })
-const report = { started: new Date().toISOString(), listings: {}, api: {}, images: {}, missing: [] }
+const PLUGIN = 5
+const skipImages = process.argv.includes('--no-images')
 
-const BUCKETS = [
-	'https://earthborne-rangers-bucket.s3.eu-west-3.amazonaws.com',
-	'https://earthborne-rangers.s3.eu-west-3.amazonaws.com',
-]
+const get = (url) => fetch(url, { signal: AbortSignal.timeout(60000) })
 
-async function get(url, opts = {}) {
-	try {
-		const res = await fetch(url, { ...opts, signal: AbortSignal.timeout(30000) })
-		return res
-	} catch (e) {
-		return { ok: false, status: String(e.message || e) }
-	}
+// 1) The plugin: a JSON string holding gzipped, base64-encoded JSON.
+const res = await get(`https://dragncards.com/be/api/plugins/${PLUGIN}`)
+if (!res.ok) throw new Error(`DragnCards answered ${res.status}`)
+let body = await res.json()
+if (typeof body === 'string') body = JSON.parse(zlib.gunzipSync(Buffer.from(body, 'base64')).toString('utf8'))
+if (!/earthborne/i.test(body.name)) throw new Error(`Plugin ${PLUGIN} is "${body.name}", not Earthborne Rangers`)
+
+// Tidy each card: drop empty fields, keep both sides.
+const tidy = (side) => {
+	if (!side || !side.name) return null
+	const o = {}
+	for (const [k, v] of Object.entries(side)) if (v !== '' && v != null) o[k] = v
+	return o
 }
-
-// 1) Try listing each bucket (works if listing is public).
-const keys = new Map() // key -> bucket
-for (const b of BUCKETS) {
-	let token = null
-	let pages = 0
-	do {
-		const url = `${b}/?list-type=2&max-keys=1000${token ? `&continuation-token=${encodeURIComponent(token)}` : ''}`
-		const res = await get(url)
-		if (!res.ok) {
-			report.listings[b] = `no listing (${res.status})`
-			break
-		}
-		const xml = await res.text()
-		for (const m of xml.matchAll(/<Key>([^<]+)<\/Key>/g)) keys.set(m[1], b)
-		token = xml.match(/<NextContinuationToken>([^<]+)</)?.[1] ?? null
-		pages++
-		report.listings[b] = `listed (${pages} page${pages > 1 ? 's' : ''})`
-	} while (token && pages < 20)
+const cards = {}
+for (const id of Object.keys(body.card_db).sort()) {
+	const c = body.card_db[id]
+	cards[id] = { A: tidy(c.A), B: tidy(c.B) }
+	if (!cards[id].B) delete cards[id].B
 }
-fs.writeFileSync(path.join(outDir, 's3-keys.json'), JSON.stringify([...keys].map(([k, b]) => `${b}/${k}`), null, 1) + '\n')
+fs.writeFileSync(path.join(outDir, 'card-db.json'), JSON.stringify(cards, null, '\t') + '\n')
+fs.writeFileSync(path.join(outDir, 'game-def.json'), JSON.stringify(body.game_def, null, '\t') + '\n')
+fs.writeFileSync(
+	path.join(outDir, 'plugin.json'),
+	JSON.stringify({ id: body.id, name: body.name, version: body.version, repo_url: body.repo_url, fetched: new Date().toISOString(), cards: Object.keys(cards).length }, null, '\t') + '\n',
+)
+console.log(`Card database: ${Object.keys(cards).length} cards (plugin version ${body.version})`)
 
-// 2) Try DragnCards' API for the plugin and its card database.
-for (const base of ['https://dragncards.com', 'https://www.dragncards.com']) {
-	const res = await get(`${base}/api/plugins`, { headers: { accept: 'application/json' } })
-	report.api[`${base}/api/plugins`] = res.status
-	if (!res.ok) continue
-	let list
-	try {
-		list = await res.json()
-	} catch {
-		continue
-	}
-	fs.writeFileSync(path.join(outDir, 'api-plugins.json'), JSON.stringify(list, null, 1) + '\n')
-	const arr = Array.isArray(list) ? list : list.plugins || list.data || []
-	const mine = arr.filter((p) => /earthborne|rangers/i.test(JSON.stringify(p).slice(0, 2000)))
-	for (const p of mine) {
-		const id = p.id ?? p.plugin_id
-		for (const u of [`${base}/api/plugins/${id}`, `${base}/api/plugins/${id}/card_db`, `${base}/api/plugins/info/${id}`]) {
-			const r = await get(u, { headers: { accept: 'application/json' } })
-			report.api[u] = r.status
-			if (r.ok) fs.writeFileSync(path.join(outDir, `api-plugin-${id}-${u.split('/').pop()}.json`), await r.text())
-		}
-	}
-	break
-}
+// 2) Pictures.
+if (!skipImages) {
+	const prefix = body.game_def.imageUrlPrefix?.English || body.game_def.imageUrlPrefix?.Default
+	const files = new Set()
+	for (const c of Object.values(cards)) for (const s of [c.A, c.B]) if (s?.imageUrl) files.add(s.imageUrl)
+	const backs = Object.entries(body.game_def.cardBacks || {}).map(([k, v]) => [v.imageUrl, `back-${k}.jpg`])
 
-// 3) Download a picture for every card ID (front and, where there is one, back).
-const decks = JSON.parse(fs.readFileSync(path.join(outDir, 'prebuilt-decks.json'), 'utf8'))
-const ids = new Set()
-for (const d of Object.values(decks)) for (const [id] of d.cards) ids.add(id)
-for (const id of ['00000', '01000', '02000']) ids.add(id)
-// Ranger cards too (IDs from RangersDB), so the game can show every card's picture.
-try {
-	for (const c of JSON.parse(fs.readFileSync(path.join(root, 'data', 'cards.json'), 'utf8'))) ids.add(c.id)
-} catch {}
-
-const FOLDERS = {
-	'00': ['00_Challenge_Deck'],
-	'01': ['01_Rangers_Cards'],
-	'02': ['02_Path_Cards'],
-	'03': ['03_Missions', '03_Mission_Cards', '03_Mission'],
-	'04': ['04_Weather', '04_Weather_Cards'],
-	'05': ['05_Locations', '05_Location_Cards', '05_Location'],
-	'06': ['06_Map_and_Reference', '06_Map', '06_Reference', '06_Map&Reference'],
-}
-
-// Index the listing by file name so any folder layout works.
-const byFile = new Map()
-for (const [k, b] of keys) {
-	const f = k.split('/').pop()
-	if (!byFile.has(f)) byFile.set(f, [])
-	byFile.get(f).push(`${b}/${k}`)
-}
-
-async function save(url, file) {
-	const res = await get(url)
-	if (!res.ok) return false
-	const buf = Buffer.from(await res.arrayBuffer())
-	if (buf.length < 1000) return false
-	fs.writeFileSync(path.join(imgDir, file), buf)
-	return true
-}
-
-for (const id of [...ids].sort()) {
-	for (const side of ['', 'B', 'b', '_back', '-back']) {
-		const name = id + side
-		const want = `${name}.jpg`
-		if (fs.existsSync(path.join(imgDir, want))) {
-			report.images[name] = 'already'
-			continue
-		}
-		const candidates = []
-		for (const ext of ['jpg', 'png', 'webp', 'JPG']) for (const u of byFile.get(`${name}.${ext}`) || []) candidates.push(u)
-		for (const b of BUCKETS)
-			for (const f of FOLDERS[id.slice(0, 2)] || [])
-				for (const ext of ['jpg', 'png']) {
-					candidates.push(`${b}/cards/${f}/${name}.${ext}`)
+	const missing = []
+	let got = 0
+	const jobs = [...[...files].map((f) => [prefix + f, f]), ...backs]
+	const save = async ([url, file]) => {
+		const dest = path.join(imgDir, file)
+		if (fs.existsSync(dest)) return got++
+		for (let i = 0; i < 3; i++) {
+			try {
+				const r = await get(url)
+				if (!r.ok) {
+					if (r.status === 403 || r.status === 404) break
+					continue
 				}
-		for (const b of BUCKETS) candidates.push(`${b}/cards/${name}.jpg`)
-		let got = null
-		for (const u of candidates) {
-			if (await save(u, want)) {
-				got = u
-				break
-			}
-			if (side && !byFile.size) break // without a listing, only one guess for backs
+				fs.writeFileSync(dest, Buffer.from(await r.arrayBuffer()))
+				return got++
+			} catch {}
 		}
-		if (got) report.images[name] = got
-		else if (!side) report.missing.push(id)
+		missing.push(file)
 	}
+	for (let i = 0; i < jobs.length; i += 12) await Promise.all(jobs.slice(i, i + 12).map(save))
+	fs.writeFileSync(path.join(outDir, 'images-missing.json'), JSON.stringify(missing.sort(), null, 1) + '\n')
+	console.log(`Pictures: ${got} saved, ${missing.length} missing (from ${prefix})`)
 }
-
-report.finished = new Date().toISOString()
-report.downloaded = Object.keys(report.images).length
-fs.writeFileSync(path.join(outDir, 'fetch-report.json'), JSON.stringify(report, null, 1) + '\n')
-console.log(`Listed keys: ${keys.size}. Pictures: ${report.downloaded}. Missing fronts: ${report.missing.length}`)
-console.log(JSON.stringify(report.listings), JSON.stringify(report.api))
