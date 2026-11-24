@@ -20,9 +20,10 @@ jobs:
         with:
           node-version: 20
       - run: node scripts/fetch-path-cards.mjs
+      - run: node scripts/build-game-data.mjs
       - name: Commit
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
-          git add images data/dragncards
+          git add images data/dragncards src/data/game.json
           git diff --cached --quiet || { git commit -m "Fetch path card pictures (DragnCards plugin sources)"; git pull --rebase; git push; }

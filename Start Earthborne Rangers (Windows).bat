@@ -1,0 +1,30 @@
+@echo off
+rem Double-click to play Earthborne Rangers on Windows.
+rem Starts the game and opens it in your browser. Close this window (or press Ctrl+C) to stop it.
+title Earthborne Rangers
+cd /d "%~dp0"
+
+where node >nul 2>nul
+if errorlevel 1 (
+  echo Node.js is not installed. Get the LTS version from https://nodejs.org, then double-click this file again.
+  pause
+  exit /b 1
+)
+
+if not exist node_modules (
+  echo First run: installing, about a minute...
+  call npm install
+  if errorlevel 1 (
+    echo Install failed.
+    pause
+    exit /b 1
+  )
+)
+
+echo.
+echo Starting Earthborne Rangers... your browser will open in a moment.
+echo Leave this window open while you play. Close it to stop the game.
+echo.
+echo To play on a tablet or phone on the same Wi-Fi, use the Network address shown below.
+call npm run dev -- --open --host --port 5175
+pause

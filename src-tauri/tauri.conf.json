@@ -1,0 +1,45 @@
+{
+	"$schema": "https://schema.tauri.app/config/2",
+	"productName": "Earthborne Rangers",
+	"version": "../package.json",
+	"identifier": "io.github.kbiben29hue.earthbornerangers",
+	"build": {
+		"beforeDevCommand": "npm run dev -- --port 1420 --strictPort",
+		"devUrl": "http://localhost:1420",
+		"beforeBuildCommand": "npm run build",
+		"frontendDist": "../dist"
+	},
+	"app": {
+		"withGlobalTauri": true,
+		"windows": [
+			{
+				"label": "main",
+				"title": "Earthborne Rangers",
+				"width": 1440,
+				"height": 900,
+				"minWidth": 760,
+				"minHeight": 600,
+				"backgroundColor": "#2f4a3f"
+			}
+		],
+		"security": {
+			"csp": null
+		}
+	},
+	"bundle": {
+		"active": true,
+		"targets": ["app", "dmg", "nsis"],
+		"category": "CardGame",
+		"shortDescription": "Unofficial table for Earthborne Rangers",
+		"copyright": "Fan project. Not affiliated with Earthborne Games.",
+		"icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+		"macOS": {
+			"signingIdentity": "-",
+			"minimumSystemVersion": "11.0"
+		},
+		"windows": {
+			"webviewInstallMode": { "type": "downloadBootstrapper" },
+			"nsis": { "installMode": "currentUser" }
+		}
+	}
+}

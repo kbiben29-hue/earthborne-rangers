@@ -1,0 +1,128 @@
+# Every push to main (and manual runs) publishes:
+#  • the play site → GitHub Pages of this repo: https://kbiben29-hue.github.io/earthborne-rangers/
+#    (Settings → Pages → Source: GitHub Actions)
+#  • Mac (.dmg, universal) and Windows (.exe) apps → a new release on this repo, always at
+#      https://github.com/kbiben29-hue/earthborne-rangers/releases/latest/download/Earthborne-Rangers-Mac.dmg
+#      https://github.com/kbiben29-hue/earthborne-rangers/releases/latest/download/Earthborne-Rangers-Windows-Setup.exe
+# Card pictures aren't bundled: the game loads them from this repo's images/ folder.
+# Only GITHUB_TOKEN is used; no extra secrets.
+
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md', 'docs/**', 'images/**', 'data/**', '.github/workflows/update-cards.yml', '.github/workflows/fetch-path-cards.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npm test
+
+  site:
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: https://kbiben29-hue.github.io/earthborne-rangers/
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund && npm run build
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist
+      # deploy-pages sometimes can't see the artifact it was just given; wait and try again
+      - id: deploy
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
+      - if: steps.deploy.outcome == 'failure'
+        run: sleep 45
+      - id: deploy2
+        if: steps.deploy.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
+      - if: steps.deploy.outcome == 'failure' && steps.deploy2.outcome == 'failure'
+        run: sleep 90
+      - if: steps.deploy.outcome == 'failure' && steps.deploy2.outcome == 'failure'
+        uses: actions/deploy-pages@v4
+
+  desktop:
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: --target universal-apple-darwin
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+          - platform: windows-latest
+            args: ''
+            rust-targets: ''
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+      - run: npm install --no-audit --no-fund
+      - run: npx --yes @tauri-apps/cli@^2 build ${{ matrix.args }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rangers-${{ matrix.platform }}
+          path: |
+            src-tauri/target/**/release/bundle/dmg/*.dmg
+            src-tauri/target/**/release/bundle/nsis/*.exe
+          if-no-files-found: error
+
+  publish:
+    needs: desktop
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: installers
+      - name: Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          mkdir out
+          cp "$(find installers -name '*.dmg' | head -1)" out/Earthborne-Rangers-Mac.dmg
+          cp "$(find installers -name '*.exe' | head -1)" out/Earthborne-Rangers-Windows-Setup.exe
+          tag="build-${{ github.run_number }}"
+          gh release create "$tag" out/* \
+            --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" \
+            --title "Earthborne Rangers (build ${{ github.run_number }})" \
+            --notes "Mac: Earthborne-Rangers-Mac.dmg (Apple silicon and Intel). Windows: Earthborne-Rangers-Windows-Setup.exe. Play in a browser instead: https://kbiben29-hue.github.io/earthborne-rangers/ — The apps load card pictures from github.com/kbiben29-hue/earthborne-rangers (internet needed the first time). They are not code-signed: on a Mac, right-click the app and choose Open (or System Settings → Privacy & Security → Open Anyway); on Windows, click More info → Run anyway." \
+            --latest
+          # keep only the 3 newest builds
+          gh release list --repo "${{ github.repository }}" --limit 100 --json tagName,createdAt \
+            --jq 'sort_by(.createdAt) | reverse | .[3:] | .[].tagName' |
+            while read -r old; do gh release delete "$old" --repo "${{ github.repository }}" --yes --cleanup-tag; done
