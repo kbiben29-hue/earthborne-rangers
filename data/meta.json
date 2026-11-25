@@ -1,23 +1,32 @@
 {
-	"source": "https://github.com/zzorba/rangers-card-data (RangersDB, https://rangersdb.com)",
-	"source_commit": "3e7840275c57fe600dee807bb9e92f1f02cde2c3",
-	"updated": "2026-11-24T07:36:22.335Z",
-	"cards": 265,
+	"source": "https://github.com/harababurel/rangers-card-data (earthborne.build; fork of RangersDB zzorba/rangers-card-data)",
+	"source_commit": "0cedf2990b4c5775b8c0707154c5b5ec6c6eb6ff",
+	"updated": "2026-11-25T04:36:23.823Z",
+	"cards": 828,
 	"by_pack": {
-		"core": 140,
-		"loa": 29,
-		"sotv": 81,
-		"sib": 5,
-		"sos": 5,
+		"core": 366,
+		"loa": 185,
+		"sotv": 103,
+		"sib": 47,
+		"sos": 47,
+		"mop": 38,
+		"miv": 37,
 		"itm": 5
 	},
 	"by_type": {
-		"moment": 71,
+		"moment": 135,
 		"attribute": 29,
-		"gear": 86,
-		"attachment": 39,
-		"being": 21,
+		"gear": 88,
+		"attachment": 46,
+		"being": 140,
 		"role": 15,
-		"feature": 4
+		"feature": 125,
+		"aspect": 24,
+		"location": 68,
+		"weather": 18,
+		"mission": 98,
+		"challenge": 24,
+		"aspiration": 10,
+		"rules": 8
 	}
 }

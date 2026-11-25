@@ -12,7 +12,30 @@ const db = read('data/dragncards/card-db.json')
 const def = read('data/dragncards/game-def.json')
 const challenge = read('data/challenge-deck.json')
 // RangersDB has cleaner Ranger card text (line breaks, [AWA] icons): use it where the ids match.
-const rdb = Object.fromEntries(read('data/cards.json').map((c) => [c.id, c]))
+const rdbList = read('data/cards.json')
+const rdb = Object.fromEntries(rdbList.map((c) => [c.id, c]))
+// The earthborne.build data (harababurel/rangers-card-data) also has every path, location, weather and
+// mission card. DragnCards has the pictures but no text for most expansion cards: fill it in by name.
+const PACK = { Core: 'core', LoA: 'loa', SoV: 'sotv', SiB: 'sib', SoS: 'sos', MoP: 'mop', MoV: 'miv' }
+const norm = (s) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
+const rcBy = {}
+for (const c of rdbList) (rcBy[`${c.pack_id}:${norm(c.name)}`] ??= []).push(c)
+const rcFind = (pack, name, type) => {
+	const l = rcBy[`${PACK[pack] ?? pack}:${norm(name)}`] ?? rcBy[`${PACK[pack] ?? pack}:${norm(name).replace(/s$/, '')}`]
+	if (!l) return null
+	return l.find((c) => norm(c.type_id) === norm(type)) ?? l[0]
+}
+/** RangersDB-style card → text in the DragnCards layout the parser reads. */
+function rcText(c) {
+	const fix = (t) => String(t).replace(/<hr>/g, '\n').replace(/(\d) \[(harm|progress)\]/g, '$1[$2]')
+	const lines = []
+	if (c.text) lines.push(fix(c.text))
+	if (c.arrival_setup) lines.push('Arrival Setup:', fix(c.arrival_setup))
+	for (const sym of ['sun', 'mountain', 'crest']) if (c[`${sym}_challenge`]) lines.push(`[${sym}] ${fix(c[`${sym}_challenge`])}`)
+	return lines.join('\n').trim()
+}
+const rcThreshold = (v) => (v == null ? null : String(v).replace(/\[per_ranger\]/g, '[perranger]'))
+let filled = 0
 
 // How many copies of each card (from DragnCards' prebuilt decks).
 const qty = {}
@@ -34,6 +57,7 @@ function clean(t) {
 	if (!t) return ''
 	return String(t)
 		.replace(/\\n/g, '\n')
+		.replace(/<hr\s*\/?>/g, '\n')
 		.replace(/<\\(b|f|i)>/g, '</$1>')
 		.replace(/\\(b|f|i)>/g, '</$1>')
 		.replace(/<f>(.*?)<f>/g, '<f>$1</f>')
@@ -74,6 +98,27 @@ for (const [id, c] of Object.entries(db)) {
 		img: a.imageUrl,
 	}
 	if (a.traits) o.traits = a.traits
+	const nameA = a.name.split(' / ')[0]
+	const rcA = !clean(a.text) ? rcFind(a.pack_code, nameA === 'Trail of Ooze' ? 'Trial of Ooze' : nameA, type) : null
+	if (rcA) {
+		filled++
+		a.text = rcText(rcA)
+		if (a.presence == null && rcA.presence != null) a.presence = rcA.presence
+		if (!a.progress_threshold && rcA.progress) a.progress_threshold = rcThreshold(rcA.progress)
+		if (!a.harm_threshold && rcA.harm) a.harm_threshold = rcA.harm === '/' ? '-' : rcThreshold(rcA.harm)
+		if (!a.reveal && rcA.area_id) a.reveal = rcA.area_id === 'within_reach' ? 'within_reach' : 'along_the_way'
+		if (!a.traits && rcA.traits) o.traits = rcA.traits
+		if (rcA.category_id === 'ranger') {
+			if (a.cost == null || a.cost === '') a.cost = rcA.cost
+			if (!a.sphere_name && rcA.aspect_id) {
+				a.sphere_name = rcA.aspect_id
+				a.sphere_cost = rcA.level
+			}
+			if (!a.equip_value && rcA.equip) a.equip_value = rcA.equip
+			if (!a.generic_token && rcA.token_id) a.generic_token = `${rcA.token_count ?? 0} ${rcA.token_id}`
+			for (const k of ['conflict', 'reason', 'exploration', 'connection']) if (!a[`${k}_number`] && rcA[`approach_${k}`]) a[`${k}_number`] = rcA[`approach_${k}`]
+		}
+	}
 	const text = a.cardBack === 'player' && rdb[id]?.name === a.name && rdb[id].text ? clean(rdb[id].text) : clean(a.text)
 	if (text) o.text = text
 	const kw = keywords(text)
@@ -113,6 +158,14 @@ for (const [id, c] of Object.entries(db)) {
 	}
 	if (a.pivotal != null) o.pivotal = a.pivotal === '1'
 	if (b?.name && a.cardBack === 'multi_sided') {
+		const rcB = !clean(b.text) ? rcFind(a.pack_code, b.name, b.type ?? type) : null
+		if (rcB) {
+			filled++
+			b.text = rcText(rcB)
+			if (b.presence == null && rcB.presence != null) b.presence = rcB.presence
+			if (!b.progress_threshold && rcB.progress) b.progress_threshold = rcThreshold(rcB.progress)
+			if (!b.harm_threshold && rcB.harm) b.harm_threshold = rcB.harm === '/' ? '-' : rcThreshold(rcB.harm)
+		}
 		o.B = { name: b.name, img: b.imageUrl }
 		const tb = clean(b.text)
 		if (tb) o.B.text = tb
@@ -170,4 +223,5 @@ for (const [k, d] of Object.entries(def.preBuiltDecks)) {
 const out = { built: new Date().toISOString().slice(0, 10), cards, sets, challenge, prebuilt }
 fs.mkdirSync(path.join(root, 'src/data'), { recursive: true })
 fs.writeFileSync(path.join(root, 'src/data/game.json'), JSON.stringify(out))
+console.log(`text from earthborne.build data for ${filled} card sides`)
 console.log(`game.json: ${Object.keys(cards).length} cards, ${Object.keys(sets).length} sets, ${Object.keys(prebuilt).length} prebuilt Rangers`)

@@ -19,8 +19,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Download RangersDB card data
-        run: git clone --depth 1 https://github.com/zzorba/rangers-card-data /tmp/rangers-card-data
+      - name: Download Earthborne card data (earthborne.build fork of RangersDB)
+        run: git clone --depth 1 https://github.com/harababurel/rangers-card-data /tmp/rangers-card-data
       - name: Build data/
         run: node scripts/update-cards.mjs /tmp/rangers-card-data
       - name: Commit if anything changed
@@ -32,6 +32,6 @@ jobs:
           if git diff --cached --quiet -- data ':!data/meta.json'; then
             echo "No card changes."
           else
-            git commit -m "Update Earthborne cards from RangersDB"
+            git commit -m "Update Earthborne cards (earthborne.build data)"
             git push
           fi

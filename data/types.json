@@ -50,5 +50,17 @@
 	{
 		"id": "challenge",
 		"name": "Challenge"
+	},
+	{
+		"id": "weather",
+		"name": "Weather"
+	},
+	{
+		"id": "rules",
+		"name": "Rules"
+	},
+	{
+		"id": "aspiration",
+		"name": "Aspiration"
 	}
 ]

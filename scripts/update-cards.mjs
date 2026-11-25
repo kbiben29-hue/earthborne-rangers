@@ -1,7 +1,9 @@
 #!/usr/bin/env node
-// Builds data/ from a checkout of RangersDB's card data (github.com/zzorba/rangers-card-data).
+// Builds data/ from a checkout of the Earthborne card data: harababurel/rangers-card-data, the fork of
+// RangersDB's data (zzorba/rangers-card-data) behind earthborne.build that adds every path, location,
+// weather, mission and challenge card (CC0).
 //
-//   git clone --depth 1 https://github.com/zzorba/rangers-card-data /tmp/rangers-card-data
+//   git clone --depth 1 https://github.com/harababurel/rangers-card-data /tmp/rangers-card-data
 //   node scripts/update-cards.mjs /tmp/rangers-card-data
 //
 // The GitHub Action "Update Earthborne cards" does both steps every Monday.
@@ -42,6 +44,8 @@ const plain = (t) =>
 const all = []
 const byPack = {}
 for (const pack of packs) {
+	// the core set is "ebr" in some forks but its folder is packs/core
+	if (pack.id === 'ebr') pack.id = 'core'
 	const dir = path.join(src, 'packs', pack.id)
 	if (!fs.existsSync(dir)) continue
 	const cards = []
@@ -83,7 +87,7 @@ try {
 const counts = {}
 for (const c of all) counts[c.type_id] = (counts[c.type_id] ?? 0) + 1
 write('meta.json', {
-	source: 'https://github.com/zzorba/rangers-card-data (RangersDB, https://rangersdb.com)',
+	source: 'https://github.com/harababurel/rangers-card-data (earthborne.build; fork of RangersDB zzorba/rangers-card-data)',
 	source_commit: commit,
 	updated: new Date().toISOString(),
 	cards: all.length,

@@ -18,6 +18,10 @@ npm run data    # scripts/build-game-data.mjs → src/data/game.json
 - `data/dragncards/card-db.json` — DragnCards Earthborne plugin (id 5) card database, fetched by
   `scripts/fetch-path-cards.mjs` from `https://dragncards.com/be/api/plugins/5` (gzipped base64 JSON).
   Pictures in `images/` come from `game_def.imageUrlPrefix` (S3 `earthborne-rangers/eng/`).
+- `data/cards.json`, `data/by-pack/` — the earthborne.build card data (github.com/harababurel/rangers-card-data,
+  CC0; a fork of RangersDB that adds every path, location, weather, mission and challenge card), refreshed by
+  `scripts/update-cards.mjs` (weekly workflow). `build-game-data.mjs` fills in text, thresholds, presence and
+  Ranger-card stats by pack + name wherever DragnCards has a picture but no text (ids differ between the two).
 - `data/challenge-deck.json` — read off the challenge card pictures (each aspect column sums to −3).
 - `scripts/build-game-data.mjs` — compacts the card db: thresholds (`{n, per}`, `{ranger}`, `{x}`),
   keywords, icons, map links (`links: [{to, path}]`), prebuilt Rangers, copies per card.
@@ -74,6 +78,7 @@ npm run data    # scripts/build-game-data.mjs → src/data/game.json
    Conductor, Influential, Gratitude of the Valley, Superior Trail, Brightfruit Tree's response.
 2. Campaign tracker weather schedule per day (from the printed tracker) and day-30 handling.
 3. Online play with a friend (PeerJS, like Afterlife).
-4. Expansion order agreed with Kris: SoV (done, see above) → Spire in Bloom + Shadow of the Storm (DragnCards
-   has pictures but no text: read it off `images/` into a text-override file) → Moments on the Path /
-   Valley → Legacy of the Ancestors (66 cards without text). Into the Maw: only its 5 Ranger cards exist.
+4. Expansion order agreed with Kris: SoV (done, see above) → Spire in Bloom + Shadow of the Storm →
+   Moments on the Path / Valley → Legacy of the Ancestors. Card text for all of them now comes from the
+   earthborne.build data (below); what's left is the rules each box adds (locations on the map, path
+   sets, missions, weather, Otherworld deck, effigies, Arcology…). Into the Maw: only its 5 Ranger cards exist.

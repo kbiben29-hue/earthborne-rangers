@@ -1,6 +1,6 @@
 [
 	{
-		"id": "06201",
+		"id": "08201",
 		"cost": 2,
 		"position": 201,
 		"quantity": 4,
@@ -23,6 +23,7 @@
 		"subset_position": 1,
 		"token_id": "vine",
 		"token_count": 3,
+		"category_id": "ranger",
 		"pack_id": "itm",
 		"pack_name": "Into the Maw",
 		"set_name": "Reward",
@@ -30,7 +31,7 @@
 		"plain_text": "[FOC] + [exploration] (use 1 vine): Detect [X] hazards in the environment to exhaust a feature. X is that feature's presence."
 	},
 	{
-		"id": "06202",
+		"id": "08202",
 		"cost": 0,
 		"position": 202,
 		"quantity": 4,
@@ -51,6 +52,7 @@
 		"spoiler": true,
 		"subset_id": "itm_reward",
 		"subset_position": 2,
+		"category_id": "ranger",
 		"pack_id": "itm",
 		"pack_name": "Into the Maw",
 		"set_name": "Reward",
@@ -58,7 +60,7 @@
 		"plain_text": "Choose a Ranger. That Ranger may search their Ranger deck or discard for a gear and play it (paying its cost)."
 	},
 	{
-		"id": "06203",
+		"id": "08203",
 		"cost": 2,
 		"position": 203,
 		"quantity": 4,
@@ -72,13 +74,14 @@
 		"approach_connection": 2,
 		"approach_reason": 1,
 		"type_id": "being",
-		"traits": "Compansion / Crustacean",
+		"traits": "Companion / Crustacean",
 		"presence": 1,
 		"harm": 1,
 		"text": "Friendly. Persistent. Unique.\n<b>[AWA] + [exploration]: Scavenge [2]</b> <f>as Lunn might, to</f> shuffle your discard and choose 1 card at random from it. You may attach that card facedown to this being.\n<b>Exhaust:</b> Play one of your facedown cards attached to this being <f>(paying its cost)</f>.",
 		"spoiler": true,
 		"subset_id": "itm_reward",
 		"subset_position": 3,
+		"category_id": "ranger",
 		"pack_id": "itm",
 		"pack_name": "Into the Maw",
 		"set_name": "Reward",
@@ -86,7 +89,7 @@
 		"plain_text": "Friendly. Persistent. Unique.\n[AWA] + [exploration]: Scavenge [2] as Lunn might, to shuffle your discard and choose 1 card at random from it. You may attach that card facedown to this being.\nExhaust: Play one of your facedown cards attached to this being (paying its cost)."
 	},
 	{
-		"id": "06204",
+		"id": "08204",
 		"cost": 1,
 		"position": 204,
 		"quantity": 4,
@@ -105,6 +108,7 @@
 		"spoiler": true,
 		"subset_id": "itm_reward",
 		"subset_position": 4,
+		"category_id": "ranger",
 		"pack_id": "itm",
 		"pack_name": "Into the Maw",
 		"set_name": "Reward",
@@ -112,7 +116,7 @@
 		"plain_text": "Attach to a being or feature.\nRefresh: Add 2[harm] to the attached card."
 	},
 	{
-		"id": "06205",
+		"id": "08205",
 		"cost": 1,
 		"position": 205,
 		"quantity": 4,
@@ -134,6 +138,7 @@
 		"subset_position": 5,
 		"token_id": "grub",
 		"token_count": 0,
+		"category_id": "ranger",
 		"pack_id": "itm",
 		"pack_name": "Into the Maw",
 		"set_name": "Reward",
