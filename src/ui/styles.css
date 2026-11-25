@@ -1967,3 +1967,6 @@ img,
 	-webkit-user-select: text;
 	user-select: text;
 }
+.bubble.floating {
+	transform: none;
+}

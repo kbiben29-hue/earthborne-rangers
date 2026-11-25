@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useMotion } from './motion'
 import { coachFor, eventNote, INTRO, type CoachStep } from './coach'
 import { GUIDE_PACK, GuideWindow } from './guide'
@@ -71,7 +71,7 @@ export function Board({
 	const [note, setNote] = useState<CoachStep | null>(null)
 	const prevG = useRef(g)
 	const [pick, setPick] = useState<Pick>(null)
-	const [bubble, setBubble] = useState<{ uid: number; x: number; y: number } | null>(null)
+	const [bubble, setBubble] = useState<{ uid: number; x: number; y: number; below: number } | null>(null)
 	const [me, setMe] = useState(0)
 	const [manual, setManual] = useState(() => localStorage.getItem('earthborne.manual') === '1')
 	const [panel, setPanel] = useState<'none' | 'log' | 'menu' | 'search' | 'map'>('none')
@@ -158,7 +158,7 @@ export function Board({
 		const acts = cardActions(uid)
 		if (acts.length) {
 			const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-			setBubble({ uid, x: r.left + r.width / 2, y: r.top })
+			setBubble({ uid, x: r.left + r.width / 2, y: r.top, below: r.bottom })
 			setSel(null)
 		} else {
 			setBubble(null)
@@ -447,7 +447,7 @@ export function Board({
 				</div>
 				{drag && R.hand[drag.index] && <img className="drag-ghost" src={cardImg(R.hand[drag.index])} style={{ left: drag.x, top: drag.y }} alt="" />}
 				{lifted && R.hand[lifted.index] && !drag && (
-					<div className="bubble hand-tip" style={{ left: lifted.x, top: lifted.y - 70 }} onClick={(e) => e.stopPropagation()}>
+					<Floating className="bubble hand-tip" x={lifted.x} y={lifted.y - 70}>
 						<b>{card(R.hand[lifted.index]).name}</b>
 						<p className="sub">
 							{card(R.hand[lifted.index]).type === 'Attribute'
@@ -467,7 +467,7 @@ export function Board({
 						>
 							Look closer…
 						</button>
-					</div>
+					</Floating>
 				)}
 			</section>
 
@@ -545,7 +545,7 @@ export function Board({
 			</div>
 
 			{bubble && g.inst[bubble.uid] && (
-				<div className="bubble" style={{ left: bubble.x, top: bubble.y }} onClick={(e) => e.stopPropagation()}>
+				<Floating className="bubble" x={bubble.x} y={bubble.y} below={bubble.below}>
 					<b>{nameOf(g, bubble.uid)}</b>
 					{cardActions(bubble.uid).map((a, k) => (
 						<button
@@ -563,7 +563,7 @@ export function Board({
 					<button className="ghost" onClick={() => inspect(bubble.uid)}>
 						Look closer…
 					</button>
-				</div>
+				</Floating>
 			)}
 
 			{refZoom && (
@@ -620,6 +620,30 @@ export function Board({
 					</div>
 				</div>
 			)}
+		</div>
+	)
+}
+
+/** A pop-up above a card that stays on screen: it flips below the card near the top, and slides in from the edges. */
+function Floating({ x, y, below, className, children }: { x: number; y: number; below?: number; className: string; children: React.ReactNode }) {
+	const ref = useRef<HTMLDivElement>(null)
+	const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
+	useLayoutEffect(() => {
+		const el = ref.current
+		if (!el) return
+		const w = el.offsetWidth
+		const h = el.offsetHeight
+		const vw = window.innerWidth
+		const vh = window.innerHeight
+		let top = y - h - 10
+		if (top < 8) top = below != null ? below + 10 : 8
+		if (top + h > vh - 8) top = Math.max(8, vh - h - 8)
+		const left = Math.min(Math.max(8, x - w / 2), vw - w - 8)
+		setPos({ left, top })
+	}, [x, y, below])
+	return (
+		<div ref={ref} className={`${className} floating`} style={pos ? { left: pos.left, top: pos.top } : { left: x, top: y, visibility: 'hidden' }} onClick={(e) => e.stopPropagation()}>
+			{children}
 		</div>
 	)
 }
