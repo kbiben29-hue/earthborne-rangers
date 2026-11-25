@@ -442,15 +442,11 @@ img.big.land {
 .badge.prog {
 	background: var(--prog);
 }
-.badge.prog::before {
-	content: '▲ ';
-}
+
 .badge.harm {
 	background: var(--harm);
 }
-.badge.harm::before {
-	content: '✖ ';
-}
+
 .badge.tok {
 	background: #5d5a52;
 }
@@ -2136,4 +2132,30 @@ body:has(.board.tabletop) {
 .board.tabletop .hand.fan,
 .board.tabletop .hcard {
 	touch-action: none;
+}
+
+/* card symbols cut from the card pictures */
+.ic-img {
+	height: 1.05em;
+	width: auto;
+	vertical-align: -0.16em;
+	margin: 0 0.08em;
+	display: inline-block;
+}
+.ic-img.icimg-sun,
+.ic-img.icimg-mountain,
+.ic-img.icimg-crest {
+	height: 1.35em;
+	vertical-align: -0.32em;
+}
+.ic-img.icimg-progress,
+.ic-img.icimg-harm,
+.ic-img.icimg-ranger {
+	height: 0.9em;
+	vertical-align: -0.08em;
+}
+.badge .ic-img {
+	filter: invert(1);
+	height: 0.85em;
+	margin-right: 0.2em;
 }

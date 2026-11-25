@@ -41,12 +41,14 @@ export function CardTile({
 			<span className="badges">
 				{(inst.progress > 0 || (typeof pt === 'number' && inst.kind === 'location')) && (
 					<span className="badge prog" title="Progress">
+						<Icon k="progress" />
 						{inst.progress}
 						{typeof pt === 'number' ? `/${pt}` : ''}
 					</span>
 				)}
 				{inst.harm > 0 && (
 					<span className="badge harm" title="Harm">
+						<Icon k="harm" />
 						{inst.harm}
 						{typeof ht === 'number' ? `/${ht}` : ''}
 					</span>
@@ -97,14 +99,44 @@ const ICON: Record<string, string> = {
 	SPI: 'SPI',
 }
 /** Card text with icons, as React nodes. */
+/** Symbols cut out of the card pictures (scripts/cut-icons.py → public/icons). */
+export const ICON_IMG = new Set(['conflict', 'reason', 'exploration', 'connection', 'progress', 'harm', 'sun', 'mountain', 'crest', 'conditional', 'ranger', 'guide'])
+const ALIAS: Record<string, string> = { right_arrow: 'conditional', cnf: 'conflict', rea: 'reason', exl: 'exploration', con: 'connection', per_ranger: 'perranger', prorgess: 'progress', awa: 'AWA', fit: 'FIT', foc: 'FOC', spi: 'SPI' }
+export const iconSrc = (k: string) => `./icons/${k}.png`
+const iconHtml = (k0: string) => {
+	const k = ALIAS[k0.toLowerCase()] ?? k0
+	if (ICON_IMG.has(k)) return `<img class="ic-img icimg-${k}" src="${iconSrc(k)}" alt="${k}" draggable="false"/>`
+	return ICON[k] ? `<span class="ic ic-${k}">${ICON[k]}</span>` : null
+}
+/** A card symbol as a picture, for use in JSX. */
+export function Icon({ k, title }: { k: string; title?: string }) {
+	const key = ALIAS[k.toLowerCase()] ?? k
+	if (!ICON_IMG.has(key)) return <span className={`ic ic-${key}`}>{ICON[key] ?? k}</span>
+	return <img className={`ic-img icimg-${key}`} src={iconSrc(key)} alt={key} title={title ?? key} draggable={false} />
+}
+/** Plain text (log lines) with the challenge symbols shown as their pictures. */
+export function IconText({ text }: { text: string }) {
+	const html = text
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/☀/g, iconHtml('sun')!)
+		.replace(/⛰/g, iconHtml('mountain')!)
+		.replace(/⚜/g, iconHtml('crest')!)
+		.replace(/\[(\w+)\]/g, (m, k) => iconHtml(k) ?? m)
+	return <span dangerouslySetInnerHTML={{ __html: html }} />
+}
+
 export function RulesText({ text }: { text?: string }) {
 	if (!text) return null
 	const html = text
 		.replace(/&/g, '&amp;')
 		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
 		.replace(/&lt;(\/?)(b|i|f)&gt;/g, (_, s, t) => `<${s}${t === 'f' ? 'i' : t}>`)
+		.replace(/&lt;\/?hr\s*\/?&gt;/g, '<br/>')
 		.replace(/&lt;[^&]*&gt;/g, '')
-		.replace(/\[(\w+)\]/g, (m, k) => (ICON[k] ? `<span class="ic ic-${k}">${ICON[k]}</span>` : m))
+		.replace(/\[(\w+)\]/g, (m, k) => iconHtml(k) ?? m)
 		.replace(/\n/g, '<br/>')
 	return <div className="rules" dangerouslySetInnerHTML={{ __html: html }} />
 }

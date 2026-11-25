@@ -22,7 +22,6 @@ import {
 	nameOf,
 	P,
 	presence,
-	SYM_LABEL,
 	testOptions,
 	tokenEffort,
 	typeOf,
@@ -30,7 +29,7 @@ import {
 } from '../engine/engine'
 
 import type { Game, Intent, ManualOp, Prompt } from '../engine/types'
-import { CardTile, cardImg, HandCard, imgUrl, RulesText } from './Card'
+import { CardTile, cardImg, HandCard, Icon, IconText, imgUrl, RulesText } from './Card'
 
 type Dispatch = (it: Intent) => string | null
 type Sel = { kind: 'inst'; uid: number } | { kind: 'hand'; ranger: number; index: number } | null
@@ -44,7 +43,12 @@ export interface CampaignHooks {
 }
 
 const ASPECT_NAME: Record<Aspect, string> = { AWA: 'Awareness', FIT: 'Fitness', FOC: 'Focus', SPI: 'Spirit' }
-const APPROACH_ICON: Record<string, string> = { conflict: '⚔ conflict', reason: '△ reason', exploration: '🧭 exploration', connection: '♥ connection' }
+const APPROACH_ICON: Record<string, React.ReactNode> = {
+	conflict: <><Icon k="conflict" /> conflict</>,
+	reason: <><Icon k="reason" /> reason</>,
+	exploration: <><Icon k="exploration" /> exploration</>,
+	connection: <><Icon k="connection" /> connection</>,
+}
 
 export function Board({
 	g,
@@ -656,7 +660,9 @@ export function Board({
 								.slice(-150)
 								.reverse()
 								.map((l, i) => (
-									<li key={i}>{l}</li>
+									<li key={i}>
+										<IconText text={l} />
+									</li>
 								))}
 						</ol>
 					</div>
@@ -1121,7 +1127,7 @@ export function LastTest({ g, keep = false }: { g: Game; keep?: boolean }) {
 					{t.name}: {t.success ? 'success' : 'failed'}
 				</b>
 				<span>
-					Effort {t.base} {t.mod >= 0 ? '+' : '−'} {Math.abs(t.mod)} = {t.effort} vs {t.diff} · {SYM_LABEL[t.symbol]}
+					Effort {t.base} {t.mod >= 0 ? '+' : '−'} {Math.abs(t.mod)} = {t.effort} vs {t.diff} · <Icon k={t.symbol} />
 				</span>
 			</div>
 		</div>

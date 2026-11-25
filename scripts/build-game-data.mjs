@@ -37,6 +37,7 @@ function rcText(c) {
 }
 const rcThreshold = (v) => (v == null ? null : String(v).replace(/\[per_ranger\]/g, '[perranger]'))
 let filled = 0
+let filledSym = 0
 
 // How many copies of each card (from DragnCards' prebuilt decks).
 const qty = {}
@@ -123,7 +124,19 @@ for (const [id, c] of Object.entries(db)) {
 			for (const k of ['conflict', 'reason', 'exploration', 'connection']) if (!a[`${k}_number`] && rcA[`approach_${k}`]) a[`${k}_number`] = rcA[`approach_${k}`]
 		}
 	}
-	const text = a.cardBack === 'player' && rdb[id]?.name === a.name && rdb[id].text ? clean(rdb[id].text) : clean(a.text)
+	let text = a.cardBack === 'player' && rdb[id]?.name === a.name && rdb[id].text ? clean(rdb[id].text) : clean(a.text)
+	// DragnCards sometimes leaves out a card's challenge effects (Sitka Doe, Prowling Wolhund…): add them from the earthborne.build data
+	const rcAny = rcFind(a.pack_code, nameA, type)
+	if (rcAny && text) {
+		const fix = (t) => String(t).replace(/<hr>/g, '\n').replace(/(\d) \[(harm|progress)\]/g, '$1[$2]')
+		for (const sym of ['sun', 'mountain', 'crest'])
+			if (rcAny[`${sym}_challenge`] && !text.includes(`[${sym}]`)) {
+				text += `\n[${sym}] ${fix(rcAny[`${sym}_challenge`])}`
+				filledSym++
+			}
+	}
+	// "[spi]" → "[SPI]"
+	text = text.replace(/\[(awa|fit|foc|spi)\]/g, (m, k) => `[${k.toUpperCase()}]`)
 	if (text) o.text = text
 	const kw = keywords(text)
 	if (kw.length) o.kw = kw
@@ -241,5 +254,5 @@ for (const [k, d] of Object.entries(def.preBuiltDecks)) {
 const out = { built: new Date().toISOString().slice(0, 10), cards, sets, challenge, prebuilt }
 fs.mkdirSync(path.join(root, 'src/data'), { recursive: true })
 fs.writeFileSync(path.join(root, 'src/data/game.json'), JSON.stringify(out))
-console.log(`text from earthborne.build data for ${filled} card sides`)
+console.log(`text from earthborne.build data for ${filled} card sides; ${filledSym} missing challenge effects added`)
 console.log(`game.json: ${Object.keys(cards).length} cards, ${Object.keys(sets).length} sets, ${Object.keys(prebuilt).length} prebuilt Rangers`)
