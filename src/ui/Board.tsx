@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMotion } from './motion'
 import { coachFor, eventNote, INTRO, type CoachStep } from './coach'
+import { GUIDE_PACK, GuideWindow } from './guide'
 import { ASPECTS, card, CARDS, CHALLENGE, MISSIONS_CORE, SETS, TERRAINS, type Aspect } from '../data/data'
 import {
 	baseTests,
@@ -75,8 +76,10 @@ export function Board({
 	const [manual, setManual] = useState(() => localStorage.getItem('earthborne.manual') === '1')
 	const [panel, setPanel] = useState<'none' | 'log' | 'menu' | 'search' | 'map'>('none')
 	const [drag, setDrag] = useState<{ index: number; x: number; y: number } | null>(null)
+	const [refZoom, setRefZoom] = useState<string | null>(null)
+	const [lifted, setLifted] = useState<{ index: number; x: number; y: number } | null>(null)
 	const boardRef = useRef<HTMLDivElement>(null)
-	useMotion(boardRef, g)
+	useMotion(boardRef, g, me)
 	const head = g.queue[0]
 
 	useEffect(() => {
@@ -200,11 +203,16 @@ export function Board({
 		const cost = costOf(id)
 		return Rr.energy[c.aspect ?? 'AWA'] >= (cost === 'X' ? 0 : cost)
 	}
-	const playHand = (r: number, i: number) => {
+	const playHand = (r: number, i: number, dropOn?: number) => {
 		const id = g.rangers[r].hand[i]
 		const c = card(id)
 		const cost = costOf(id)
 		const x = cost === 'X' ? Number(prompt(`Pay how much for ${c.name}? (X)`, '1') || '0') : undefined
+		setLifted(null)
+		if (c.type === 'Attachment' && dropOn != null && g.inst[dropOn]) {
+			dispatch({ t: 'play', ranger: r, hand: i, target: dropOn, x, useRole })
+			return
+		}
 		if (c.type === 'Attachment' && !/^Search the path deck and discard for/i.test((c.text ?? '').replace(/<[^>]+>/g, ''))) {
 			setPick({ why: `Attach ${c.name}: tap the card to attach it to`, ok: (u) => !!g.inst[u], done: (u) => dispatch({ t: 'play', ranger: r, hand: i, target: u, x, useRole }) })
 			return
@@ -227,11 +235,16 @@ export function Board({
 			setDrag(null)
 			const handTop = document.querySelector('.handbar')?.getBoundingClientRect().top ?? 9999
 			if (moved && ev.clientY < handTop - 20) {
-				if (playable(me, i)) playHand(me, i)
+				// dropped on a card? (attachments go onto the card you drop them on)
+				const under = document.elementFromPoint(ev.clientX, ev.clientY)?.closest<HTMLElement>('[data-uid]')
+				const dropOn = under ? Number(under.dataset.uid) : undefined
+				if (playable(me, i)) playHand(me, i, dropOn)
 				else dispatch({ t: 'play', ranger: me, hand: i, useRole })
 			} else if (!moved) {
-				if (playable(me, i)) playHand(me, i)
-				else setSel({ kind: 'hand', ranger: me, index: i })
+				// a tap lifts the card: you lay it on the table yourself by dragging it there
+				const r = (ev.target as HTMLElement).closest('.hcard')?.getBoundingClientRect()
+				setBubble(null)
+				setLifted(lifted?.index === i ? null : { index: i, x: r ? r.left + r.width / 2 : ev.clientX, y: r ? r.top : ev.clientY })
 			}
 		}
 		window.addEventListener('pointermove', move)
@@ -265,7 +278,7 @@ export function Board({
 	const lastPath = g.pathDiscard[g.pathDiscard.length - 1]
 
 	return (
-		<div className={`board tabletop ${pick || choosing ? 'picking' : ''}`} ref={boardRef} onClick={(e) => e.target === e.currentTarget && setBubble(null)}>
+		<div className={`board tabletop ${pick || choosing ? 'picking' : ''} ${drag ? 'dropping' : ''}`} ref={boardRef} onClick={(e) => e.target === e.currentTarget && setBubble(null)}>
 			<header className="topbar">
 				<button className="ghost" onClick={() => setPanel(panel === 'menu' ? 'none' : 'menu')} title="Menu">
 					☰
@@ -282,8 +295,21 @@ export function Board({
 				</button>
 			</header>
 
-			<main className="felt" onClick={(e) => e.target === e.currentTarget && setBubble(null)}>
+			<main
+				className="felt"
+				onClick={(e) => {
+					if (e.target === e.currentTarget) setBubble(null)
+					setLifted(null)
+				}}
+			>
 				<section className="sky">
+					<div className="refs" title="Reference cards">
+						{(R.spiritspeak ? ['03206.jpg'] : R.spiritOnce ? ['01431A.jpg', '03206.jpg'] : ['01431A.jpg']).concat('01431B.jpg').map((f) => (
+							<button key={f} className="ref-card" onClick={() => setRefZoom(f)}>
+								<img src={imgUrl(f)} alt={f === '01431B.jpg' ? 'Round structure' : f === '03206.jpg' ? 'Spirit Speaker tests' : 'Common tests'} />
+							</button>
+						))}
+					</div>
 					<div className="row">{weather.map((u) => tile(u))}</div>
 					<div className="loc">{tile(g.location)}</div>
 					<div className="row">{missions.map((u) => tile(u, true))}</div>
@@ -300,7 +326,7 @@ export function Board({
 				<section className="mats">
 					{g.rangers.map((r, k) => (
 						<div key={k} className={`mat r${k} ${k === me ? 'me' : ''} ${r.rested ? 'rested' : ''}`} onClick={() => k !== me && setMe(k)}>
-							<div className="mat-head">
+							<div className="mat-head" data-anchor={`mat-${k}`}>
 								<span className={`chip r${k}`}>{r.name}</span>
 								{k === g.lead && <span className="lead">lead</span>}
 								{r.rested && <span className="lead">rested</span>}
@@ -363,10 +389,11 @@ export function Board({
 						const n = R.hand.length
 						const mid = (n - 1) / 2
 						const can = playable(me, i)
+						const nth = R.hand.slice(0, i).filter((x) => x === id).length
 						return (
 							<div
-								key={i + id}
-								className={`hcard ${can ? 'glow-play' : ''} ${hint.hand?.includes(i) ? 'coach' : ''} ${drag?.index === i ? 'dragging' : ''}`}
+								key={`${id}#${nth}`}
+								className={`hcard ${can ? 'glow-play' : ''} ${hint.hand?.includes(i) ? 'coach' : ''} ${drag?.index === i ? 'dragging' : ''} ${lifted?.index === i ? 'lifted' : ''}`}
 								style={{ ['--r' as string]: `${(i - mid) * Math.min(4, 24 / n)}deg`, ['--y' as string]: `${Math.abs(i - mid) ** 1.6 * 2}px` }}
 								onPointerDown={(e) => onHandDown(i, e)}
 								onContextMenu={(e) => {
@@ -381,6 +408,29 @@ export function Board({
 					{!R.hand.length && <p className="empty">No cards in hand.</p>}
 				</div>
 				{drag && R.hand[drag.index] && <img className="drag-ghost" src={cardImg(R.hand[drag.index])} style={{ left: drag.x, top: drag.y }} alt="" />}
+				{lifted && R.hand[lifted.index] && !drag && (
+					<div className="bubble hand-tip" style={{ left: lifted.x, top: lifted.y - 70 }} onClick={(e) => e.stopPropagation()}>
+						<b>{card(R.hand[lifted.index]).name}</b>
+						<p className="sub">
+							{card(R.hand[lifted.index]).type === 'Attribute'
+								? 'Attributes are committed to tests for their icons.'
+								: playable(me, lifted.index)
+									? card(R.hand[lifted.index]).type === 'Attachment'
+										? 'Drag it onto the card you want to attach it to.'
+										: 'Drag it up onto the table to play it.'
+									: 'You can’t play this right now.'}
+						</p>
+						<button
+							className="ghost"
+							onClick={() => {
+								setSel({ kind: 'hand', ranger: me, index: lifted.index })
+								setLifted(null)
+							}}
+						>
+							Look closer…
+						</button>
+					</div>
+				)}
 			</section>
 
 			{(pick || (choosing && choosing.max === 1)) && (
@@ -413,7 +463,7 @@ export function Board({
 				</div>
 			)}
 
-			<div className="tray">
+			<div className="tray" data-anchor="tray">
 				{coachOn && intro < 0 && (step || note) && (
 					<div className={`coach-panel ${coachMin ? 'min' : ''}`}>
 						{coachMin ? (
@@ -475,6 +525,12 @@ export function Board({
 					<button className="ghost" onClick={() => inspect(bubble.uid)}>
 						Look closer…
 					</button>
+				</div>
+			)}
+
+			{refZoom && (
+				<div className="drawer ref-zoom" onClick={() => setRefZoom(null)}>
+					<img src={imgUrl(refZoom)} alt="" />
 				</div>
 			)}
 
@@ -574,7 +630,7 @@ function PromptPanel({ g, head, dispatch, setPick, onDayOver, hooks, coachEnergy
 				</div>
 			)
 		case 'guide':
-			return <Guide entry={head.entry} why={head.why} dispatch={dispatch} hooks={hooks} />
+			return <Guide entry={head.entry} why={head.why} pack={head.pack} dispatch={dispatch} hooks={hooks} />
 		case 'scout':
 			return <Scout key={head.cards.join()} g={g} head={head} dispatch={dispatch} />
 		case 'equip':
@@ -911,15 +967,20 @@ export function LastTest({ g }: { g: Game }) {
 	)
 }
 
-function Guide({ entry, why, dispatch, hooks }: { entry: string; why: string; dispatch: Dispatch; hooks: CampaignHooks }) {
+function Guide({ entry, why, pack, dispatch, hooks }: { entry: string; why: string; pack?: string; dispatch: Dispatch; hooks: CampaignHooks }) {
 	const [note, setNote] = useState('')
+	const [open, setOpen] = useState(false)
 	return (
 		<div className="panel prompt guide">
 			<h3>📖 Campaign guide entry {entry}</h3>
 			<p>
-				{why}: read entry <b>{entry}</b> in the campaign guide (or The Living Valley on earthbornegames.com) and follow it. Use the menu (☰) to add missions, rewards or notable
-				events, and the card tools for anything else it tells you to do.
+				{why}: read entry <b>{entry}</b> of the campaign guide and follow it. Use the menu (☰) to add missions, rewards or notable events, and the card tools for anything else it
+				tells you to do.
 			</p>
+			<button className="primary" onClick={() => setOpen(true)}>
+				📖 Open entry {entry}
+			</button>
+			{open && <GuideWindow entry={entry} pack={GUIDE_PACK[pack ?? 'Core'] ?? 'ebr'} onClose={() => setOpen(false)} />}
 			<div className="row-input">
 				<input placeholder="Notable event to record (optional)" value={note} onChange={(e) => setNote(e.target.value)} />
 				<button
@@ -932,7 +993,7 @@ function Guide({ entry, why, dispatch, hooks }: { entry: string; why: string; di
 					Record
 				</button>
 			</div>
-			<button className="primary" onClick={() => dispatch({ t: 'guideRead' })}>
+			<button onClick={() => dispatch({ t: 'guideRead' })}>
 				Done reading
 			</button>
 		</div>

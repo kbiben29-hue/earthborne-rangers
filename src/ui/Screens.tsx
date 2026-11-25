@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { GuideWindow } from './guide'
 import { ASPECTS, card, coreLocations, MISSIONS_CORE, TERRAINS, type Aspect } from '../data/data'
 import {
 	aspectCards,
@@ -308,6 +309,7 @@ export function CampaignView({ c, update, startDay, resume, back }: { c: Campaig
 	const [mission, setMission] = useState('')
 	const [reward, setReward] = useState('')
 	const [entry, setEntry] = useState('')
+	const [guide, setGuide] = useState<string | null>(null)
 	const [swap, setSwap] = useState<number | null>(null)
 	const set = (p: Partial<Campaign>) => update({ ...c, ...p })
 	const locs = coreLocations()
@@ -341,7 +343,10 @@ export function CampaignView({ c, update, startDay, resume, back }: { c: Campaig
 					<h3>Set up day {c.day}</h3>
 					{c.entries.length > 0 && c.day === 1 && c.history.length === 0 && (
 						<p className="guide-note">
-							📖 New campaign: read <b>entry 1</b> of the campaign guide first. It tells you where you start and your first mission. Add missions below.
+							📖 New campaign: read <b>entry 1</b> of the campaign guide first. It tells you where you start and your first mission. Add missions below.{' '}
+							<button className="link" onClick={() => setGuide('1')}>
+								Open entry 1
+							</button>
 						</p>
 					)}
 					<p className="sub">Read any campaign guide entries listed above day {c.day} on your campaign tracker.</p>
@@ -562,7 +567,21 @@ export function CampaignView({ c, update, startDay, resume, back }: { c: Campaig
 						Note
 					</button>
 				</div>
-				<p className="sub">Entries noted: {c.entries.join(', ') || 'none'}</p>
+				<p className="sub">
+					Entries noted:{' '}
+					{c.entries.length
+						? c.entries.map((e, k) => (
+								<button key={k} className="link" onClick={() => setGuide(e)}>
+									{e}
+								</button>
+							))
+						: 'none'}
+				</p>
+				<div className="row-input">
+					<input placeholder="Open a guide entry (e.g. 3 or 1.02)" id="open-entry" onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).value.trim() && setGuide((e.target as HTMLInputElement).value.trim())} />
+					<button onClick={() => { const v = (document.getElementById('open-entry') as HTMLInputElement | null)?.value.trim(); if (v) setGuide(v) }}>📖 Open</button>
+				</div>
+				{guide && <GuideWindow entry={guide} onClose={() => setGuide(null)} />}
 				<ol className="history">
 					{c.history.map((h) => (
 						<li key={h.day}>

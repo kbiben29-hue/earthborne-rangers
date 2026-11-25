@@ -233,7 +233,7 @@ export function putPathInPlay(g: Game, id: string, r: number, why = 'draws', are
 	const uid = addInst(g, id, zone === 'reach' ? 'reach' : 'along', zone === 'reach' ? r : null, 'path')
 	log(g, `${rangerName(g, r)} ${why} ${c.name} (${zone === 'reach' ? 'within reach' : 'along the way'}).`)
 	const p = parsedOf(id)
-	if (p.guide) g.queue.push({ kind: 'guide', entry: p.guide, why: `${c.name} entered play` })
+	if (p.guide) g.queue.push({ kind: 'guide', entry: p.guide, why: `${c.name} entered play`, pack: c.pack })
 	if (zone === 'reach' && p.keywords.includes('Ambush')) sufferFatigue(g, r, presence(g, uid), `${c.name} (ambush)`)
 	if (p.enters) addJob(g, { title: `${c.name} enters play`, eff: p.enters, src: uid, ranger: r }, 'end')
 	fire(g, { e: 'enters', ranger: r, uid, words: [] })
@@ -709,7 +709,7 @@ function runStep(g: Game, s: Step & { when?: Cond }, job: Job, key: string): 'ok
 			)
 		}
 		case 'guide':
-			g.queue.unshift({ kind: 'guide', entry: s.entry, why: job.src != null && g.inst[job.src] ? nameOf(g, job.src) : job.title })
+			g.queue.unshift({ kind: 'guide', entry: s.entry, why: job.src != null && g.inst[job.src] ? nameOf(g, job.src) : job.title, pack: job.src != null && g.inst[job.src] ? card(g.inst[job.src].id).pack : undefined })
 			return 'pause'
 		case 'searchPath': {
 			const pools: string[][] = [g.pathDeck, ...(s.alsoDiscard ? [g.pathDiscard] : [])]
@@ -2031,7 +2031,7 @@ export function buildPathDeck(g: Game, locId: string, terrain: string) {
 function arrive(g: Game, locId: string) {
 	const c = card(locId)
 	const pb = parsedOf(locId, 'B')
-	if (pb.guide) g.queue.push({ kind: 'guide', entry: pb.guide, why: `Arriving at ${c.name}` })
+	if (pb.guide) g.queue.push({ kind: 'guide', entry: pb.guide, why: `Arriving at ${c.name}`, pack: c.pack })
 	let who = g.lead
 	let first = true
 	for (const a of pb.arrival) {

@@ -44,7 +44,7 @@ export const INTRO: { title: string; body: string }[] = [
 	},
 	{
 		title: 'Your goal today',
-		body: 'Add progress to Lone Tree Station with Traverse until it reaches its threshold (the green number on it), then rest and travel. Tap any card to see what you can do with it; hold it (or right-click) to read it. Whatever glows gold is the coach’s suggestion.',
+		body: 'Add progress to Lone Tree Station with Traverse until it reaches its threshold (the green number on it), then rest and travel. Tap a card on the table to see what you can do with it. Tap a card in your hand to lift it, and drag it onto the table to play it. The reference cards in the top-left corner list the tests and the round; tap them to read them. Whatever glows gold is the coach’s suggestion.',
 	},
 ]
 
@@ -62,7 +62,7 @@ function suggest(g: Game, r: number): { what: string; hint: Hint; why: string } 
 	if (pred && R.energy.AWA > 0) return { what: `Avoid ${nameOf(g, pred.uid)}`, hint: { buttons: ['avoid'], uids: [pred.uid] }, why: 'A ready predator within reach fatigues you whenever you reach past it, and its challenge effects can injure you. Avoid exhausts it.' }
 	// 2. Play a cheap gear or being from hand.
 	const h = R.hand.findIndex((id) => !BY_HAND.has(card(id).name) && ['Gear', 'Being'].includes(card(id).type) && typeof costOf(id) === 'number' && R.energy[card(id).aspect ?? 'AWA'] >= (costOf(id) as number) && (costOf(id) as number) <= 2)
-	if (h >= 0) return { what: `play ${card(R.hand[h]).name}`, hint: { hand: [h] }, why: 'Gear and companions stay in play and help you all day. Glowing green cards in your hand are ones you can afford.' }
+	if (h >= 0) return { what: `play ${card(R.hand[h]).name}`, hint: { hand: [h] }, why: 'Gear and companions stay in play and help you all day. Drag the glowing card from your hand up onto the table to play it (tap it first to read what it does).' }
 	// 3. Traverse the location if nothing blocks the way.
 	if (typeof t === 'number' && loc.progress < t && R.energy.FIT > 0) {
 		const block = between(g, r, g.location).find((u) => has(g, u, 'Obstacle'))
@@ -124,7 +124,7 @@ export function coachFor(g: Game, me: number, seen: Set<string>): CoachStep | nu
 			case 'aspect':
 				return { key: 'aspect', title: 'Pick an energy type', body: h.text }
 			case 'guide':
-				return { key: 'guide', title: 'Campaign guide', body: 'In a campaign you’d read this entry in the campaign guide now. In the tutorial you can just tap “Done reading”.' }
+				return { key: 'guide', title: 'Campaign guide', body: 'A card sent you to the campaign guide. Tap “Open entry” to read it right here (only read that entry: the rest are spoilers), then tap “Done reading”.' }
 			case 'scout':
 				return { key: 'scout', title: 'Scouting', body: 'You look at the top cards of a deck and decide which stay on top (you’ll meet them soon) and which go to the bottom. Put anything dangerous on the bottom.' }
 			case 'travel':

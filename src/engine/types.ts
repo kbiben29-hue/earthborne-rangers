@@ -105,7 +105,7 @@ export type Prompt =
 	| { kind: 'ask'; title: string; text: string; ranger: number; yes?: string; no?: string }
 	| { kind: 'manual'; title: string; text: string; ranger: number }
 	| { kind: 'aspect'; title: string; text: string; ranger: number; options: Aspect[]; key: string }
-	| { kind: 'guide'; entry: string; why: string }
+	| { kind: 'guide'; entry: string; why: string; /** Pack of the card that sent you (which guide). */ pack?: string }
 	| { kind: 'scout'; ranger: number; deck: 'path' | 'ranger'; cards: string[]; drawAfter?: number }
 	| { kind: 'equip'; ranger: number }
 	| { kind: 'travel' }

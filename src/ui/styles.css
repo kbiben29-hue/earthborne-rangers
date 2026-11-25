@@ -1760,3 +1760,193 @@ details summary {
 .asp-row .mini-btns {
 	margin-left: auto;
 }
+
+/* cards arriving in hand wait for the flying card to land */
+.board.tabletop .hcard {
+	animation: hand-in 0.25s ease-out 0.45s backwards;
+}
+@keyframes hand-in {
+	from {
+		opacity: 0;
+		translate: 0 30px;
+	}
+}
+.flying-card {
+	border-radius: 6px;
+	box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
+}
+.board.tabletop .hcard.lifted {
+	transform: translateY(calc(var(--cw) * -0.45)) rotate(0deg) scale(1.12);
+	z-index: 30;
+}
+.bubble.hand-tip {
+	max-width: 240px;
+}
+.bubble.hand-tip .sub {
+	margin: 2px 0 4px;
+	font-size: 0.85rem;
+}
+.board.tabletop.dropping .felt {
+	outline: 3px dashed #ffd45a88;
+	outline-offset: -8px;
+}
+
+/* ---------------- campaign guide window */
+.drawer.guide-window {
+	justify-content: center;
+	align-items: center;
+	background: rgba(10, 18, 14, 0.72);
+	z-index: 95;
+}
+.guide-sheet {
+	background: #f7f1e3;
+	color: #2b2a26;
+	width: min(720px, 94vw);
+	max-height: calc(100dvh - 24px);
+	display: flex;
+	flex-direction: column;
+	border-radius: 16px;
+	box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+	overflow: hidden;
+}
+.guide-head {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	gap: 8px;
+	padding: 10px 14px;
+	background: var(--forest, #2e4a3d);
+	color: #fff;
+}
+.guide-head span {
+	display: flex;
+	gap: 6px;
+}
+.guide-head a.btn {
+	color: #fff;
+	text-decoration: none;
+	border: 1px solid #fff6;
+	border-radius: 8px;
+	padding: 4px 10px;
+	font-size: 0.9rem;
+}
+.guide-body {
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	padding: 12px 18px;
+	font-family: Georgia, 'Source Sans 3', serif;
+	line-height: 1.5;
+}
+.guide-text blockquote {
+	margin: 8px 0;
+	padding: 6px 12px;
+	border-left: 4px solid #c9b88f;
+	background: #efe6cf;
+	font-style: italic;
+}
+.guide-text .rules-guide-highlight,
+.guide-text .rules-guide-clear {
+	font-family: 'Josefin Sans', sans-serif;
+	font-size: 0.9rem;
+	margin: 4px 0;
+	padding: 4px 8px;
+	border-radius: 6px;
+}
+.guide-text .rules-guide-highlight {
+	background: #e3ecd9;
+}
+.guide-text a {
+	color: #2e6b4f;
+	font-weight: 700;
+}
+.guide-text img {
+	max-width: 100%;
+}
+.guide-here {
+	scroll-margin-top: 8px;
+}
+.guide-credit {
+	margin: 0;
+	padding: 6px 14px;
+	font-size: 0.75rem;
+	color: #6b6556;
+	border-top: 1px solid #0001;
+}
+button.link {
+	background: none;
+	border: 0;
+	padding: 0 4px;
+	min-height: 0;
+	color: #2e6b4f;
+	text-decoration: underline;
+	font-weight: 700;
+	cursor: pointer;
+}
+
+/* ---------------- reference cards beside the table */
+.board.tabletop .sky {
+	position: relative;
+}
+.refs {
+	position: absolute;
+	left: 0;
+	top: 0;
+	display: flex;
+	gap: 6px;
+	z-index: 2;
+}
+.ref-card {
+	padding: 0;
+	border: 0;
+	background: none;
+	min-height: 0;
+	width: calc(var(--cw) * 0.78);
+	border-radius: 6px;
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+	transition: transform 0.15s;
+	cursor: zoom-in;
+}
+.ref-card:hover {
+	transform: translateY(-3px) scale(1.04);
+}
+.ref-card img {
+	width: 100%;
+	display: block;
+	border-radius: 6px;
+}
+.drawer.ref-zoom {
+	justify-content: center;
+	align-items: center;
+	background: rgba(10, 18, 14, 0.75);
+	cursor: zoom-out;
+}
+.drawer.ref-zoom img {
+	max-height: 88dvh;
+	max-width: 92vw;
+	border-radius: 14px;
+	box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+}
+@media (max-width: 760px) {
+	.refs {
+		position: static;
+		order: 9;
+		width: 100%;
+		justify-content: center;
+	}
+	.ref-card {
+		width: calc(var(--cw) * 0.62);
+	}
+}
+.guide-head button {
+	background: #ffffff22;
+	color: #fff;
+	border: 1px solid #fff6;
+	min-height: 0;
+	padding: 4px 12px;
+}
+.tray .coach-panel.min {
+	position: fixed;
+	top: 52px;
+	right: 10px;
+	z-index: 45;
+}
