@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { GuideWindow } from './guide'
-import { ASPECTS, card, coreLocations, MISSIONS_CORE, TERRAINS, type Aspect } from '../data/data'
+import { ASPECTS, card, coreLocations, MISSIONS_CORE, PATH_PACKS, TERRAINS, type Aspect } from '../data/data'
 import {
 	aspectCards,
 	BACKGROUNDS,
@@ -19,7 +19,7 @@ import {
 	rewardCards,
 	roles,
 	SPECIALTIES,
-	WEATHER,
+	weatherOptions,
 	type Build,
 	type Campaign,
 	type CampaignRanger,
@@ -92,8 +92,9 @@ export function Home({ campaigns, open, create, remove, tutorial }: { campaigns:
 
 // ------------------------------------------------------------------ new campaign
 
-export function NewCampaign({ done, cancel }: { done: (name: string, rangers: CampaignRanger[]) => void; cancel: () => void }) {
+export function NewCampaign({ done, cancel }: { done: (name: string, rangers: CampaignRanger[], expansions: string[]) => void; cancel: () => void }) {
 	const [name, setName] = useState('Lure of the Valley')
+	const [exp, setExp] = useState<string[]>([])
 	const [rangers, setRangers] = useState<CampaignRanger[]>([])
 	const [building, setBuilding] = useState(false)
 	const [pre, setPre] = useState('UndauntedSeeker')
@@ -115,6 +116,15 @@ export function NewCampaign({ done, cancel }: { done: (name: string, rangers: Ca
 				Campaign name
 				<input value={name} onChange={(e) => setName(e.target.value)} />
 			</label>
+			<div className="panel">
+				<h4>Expansions in the Valley</h4>
+				{PATH_PACKS.map((p) => (
+					<label className="check" key={p.code}>
+						<input type="checkbox" checked={exp.includes(p.code)} onChange={(e) => setExp(e.target.checked ? [...exp, p.code] : exp.filter((x) => x !== p.code))} /> {p.name}
+					</label>
+				))}
+				<p className="sub">Their locations, path cards, missions and weather join the Lure of the Valley campaign. You can change this later on the campaign page.</p>
+			</div>
 			<h3>Rangers ({rangers.length}/4)</h3>
 			<ul className="rangers-list">
 				{rangers.map((r, k) => (
@@ -150,7 +160,7 @@ export function NewCampaign({ done, cancel }: { done: (name: string, rangers: Ca
 				</div>
 			)}
 			<div className="btns">
-				<button className="primary" disabled={!rangers.length} onClick={() => done(name.trim() || 'Campaign', rangers)}>
+				<button className="primary" disabled={!rangers.length} onClick={() => done(name.trim() || 'Campaign', rangers, exp)}>
 					Start the campaign
 				</button>
 				<button onClick={cancel}>Back</button>
@@ -312,7 +322,7 @@ export function CampaignView({ c, update, startDay, resume, back }: { c: Campaig
 	const [guide, setGuide] = useState<string | null>(null)
 	const [swap, setSwap] = useState<number | null>(null)
 	const set = (p: Partial<Campaign>) => update({ ...c, ...p })
-	const locs = coreLocations()
+	const locs = coreLocations(['Core', ...(c.expansions ?? [])])
 	const inProgress = c.game && !c.game.ended
 	return (
 		<div className="screen campaign">
@@ -356,6 +366,7 @@ export function CampaignView({ c, update, startDay, resume, back }: { c: Campaig
 							{locs.map((l) => (
 								<option key={l.id} value={l.id}>
 									{l.name}
+									{l.pack !== 'Core' ? ` (${l.pack})` : ''}
 								</option>
 							))}
 						</select>
@@ -373,13 +384,26 @@ export function CampaignView({ c, update, startDay, resume, back }: { c: Campaig
 					<label className="field">
 						Weather (as listed under day {c.day} on your tracker)
 						<select value={c.weather} onChange={(e) => set({ weather: e.target.value })}>
-							{WEATHER.map((w) => (
+							{weatherOptions(c).map((w) => (
 								<option key={w.id} value={w.id}>
 									{w.label}
 								</option>
 							))}
 						</select>
 					</label>
+					<div className="field">
+						Expansions in the Valley
+						{PATH_PACKS.map((p) => (
+							<label className="check" key={p.code}>
+								<input
+									type="checkbox"
+									checked={(c.expansions ?? []).includes(p.code)}
+									onChange={(e) => set({ expansions: e.target.checked ? [...(c.expansions ?? []), p.code] : (c.expansions ?? []).filter((x) => x !== p.code) })}
+								/>{' '}
+								{p.name}
+							</label>
+						))}
+					</div>
 					<label className="field">
 						Lead Ranger
 						<select value={c.lead} onChange={(e) => set({ lead: Number(e.target.value) })}>
@@ -424,7 +448,7 @@ export function CampaignView({ c, update, startDay, resume, back }: { c: Campaig
 				<div className="row-input">
 					<select value={mission} onChange={(e) => setMission(e.target.value)}>
 						<option value="">Add a mission…</option>
-						{MISSIONS_CORE().map((m) => (
+						{MISSIONS_CORE(['Core', ...(c.expansions ?? [])]).map((m) => (
 							<option key={m.id} value={m.id}>
 								{m.name}
 							</option>

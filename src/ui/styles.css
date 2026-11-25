@@ -1950,3 +1950,20 @@ button.link {
 	right: 10px;
 	z-index: 45;
 }
+
+/* iPad / iPhone: no "copy / share" menu when you hold a card; holding a card shows it big instead */
+img,
+.tile,
+.hcard,
+.pile,
+.ref-card,
+.board.tabletop {
+	-webkit-touch-callout: none;
+	-webkit-user-select: none;
+	user-select: none;
+}
+.guide-body,
+.guide-body * {
+	-webkit-user-select: text;
+	user-select: text;
+}

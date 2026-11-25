@@ -88,6 +88,11 @@ export type Step =
 	| { k: 'dropFatigue' }
 	/** Run a whole effect (with its condition) right after this one. */
 	| { k: 'effect'; eff: Effect }
+	/** Decks beside the path deck (Spire, Otherworld, detritus…). */
+	| { k: 'drawSide'; deck: string; amt: Amount }
+	| { k: 'scoutSide'; deck: string; amt: Amount }
+	| { k: 'sideToPath'; deck: string }
+	| { k: 'shuffleSide'; deck: string; to: Ref }
 	| { k: 'playFound'; discount: number; skipLast?: number }
 
 /** A step with an optional condition ("If X, Y" in the middle of an effect). */
@@ -114,6 +119,7 @@ export type Cond =
 	| { c: 'turns'; negate?: boolean }
 	| { c: 'spiritspeaking'; negate?: boolean }
 	| { c: 'not'; x: Cond }
+	| { c: 'failedTest' }
 
 export interface Effect {
 	/** Text as printed (flavor removed), for the log and the card viewer. */
@@ -155,7 +161,7 @@ export function normalize(s: string): string {
 	let t = s
 		.replace(/<f>[\s\S]*?<\/f>/g, ' ')
 		.replace(/<\/?[a-z]+>/gi, '')
-		.replace(/\[conditional\]/g, ' ⏩ ')
+		.replace(/\[conditional\]|\[right_arrow\]/g, ' ⏩ ')
 		.replace(/\s+/g, ' ')
 		.trim()
 	for (const [re, to] of TYPO) t = t.replace(re, to)
@@ -255,6 +261,25 @@ export function sentence(raw: string): Step[] | null {
 		if (a?.length && b?.length) return [{ k: 'either', a, b, la: cap(m[1]), lb: cap(m[2]) }]
 	}
 	if (/^this is in addition to the test's standard effect$/i.test(s)) return []
+	s = s.replace(/^,?\s*once per day,\s*/i, '')
+	if ((m = s.match(/^(?:read )?\[guide\]\s*([\d.]+)$/i))) return [{ k: 'guide', entry: m[1].replace(/\.$/, '') }]
+	if ((m = s.match(/^read \[guide\]\s*([\d.]+)$/i))) return [{ k: 'guide', entry: m[1] }]
+	if (/^soothe an equal (?:amount|number) of fatigue$/i.test(s)) return [{ k: 'soothe', amt: { same: true } }]
+	if ((m = s.match(new RegExp(`^add ${N} (?!\\[)([a-z]+) to (this card|this \\w+) for every (\\d+) effort$`, 'i')))) return [{ k: 'addTok', what: 'tokens', amt: { effort: true, per: Number(m[4]), mult: num(m[1]) }, to: { r: 'self' } }]
+	if ((m = s.match(/^move your \[ranger\] to (an? (?:active )?[\w' -]+?|the [\w' -]+? with the fewest \[ranger\] on it)(?: in play)?$/i)) && !/^(this|it|that)\b/i.test(m[1])) {
+		const to = refOf(m[1].replace(/ with the fewest \[ranger\] on it$/i, '').replace(/^the /i, 'a '))
+		if (to) return [{ k: 'rangerToken', to }]
+	}
+	if ((m = s.match(/^each ranger moves their \[ranger\] to (an? [\w' -]+?|the [\w' -]+? with the fewest \[ranger\] on it)$/i))) {
+		const to = refOf(m[1].replace(/ with the fewest \[ranger\] on it$/i, '').replace(/^the /i, 'a '))
+		if (to) return [{ k: 'rangerToken', to, each: true } as Step]
+	}
+	// decks beside the path deck
+	if ((m = s.match(new RegExp(`^draw (?:${N} cards?|the top card) (?:from|of) the ([\\w' -]+?) deck$`, 'i'))) && !/^(path|ranger|challenge)$/i.test(m[2])) return [{ k: 'drawSide', deck: m[2], amt: { n: m[1] ? num(m[1]) : 1 } }]
+	if ((m = s.match(/^scout cards from the top of the ([\w' -]+?) deck equal to your effort$/i))) return [{ k: 'scoutSide', deck: m[1], amt: { effort: true } }]
+	if ((m = s.match(new RegExp(`^scout ${N} cards? (?:from|of) the ([\\w' -]+?) deck$`, 'i'))) && !/^(path|ranger|challenge)$/i.test(m[2])) return [{ k: 'scoutSide', deck: m[2], amt: { n: num(m[1]) } }]
+	if ((m = s.match(/^place the top card of the ([\w' -]+?) deck on top of the path deck$/i))) return [{ k: 'sideToPath', deck: m[1] }]
+	if ((m = s.match(/^shuffle (it|them|this \w+) into the ([\w' -]+?) deck$/i)) && !/^(path|ranger)$/i.test(m[2])) return [{ k: 'shuffleSide', deck: m[2], to: m[1].startsWith('this') ? { r: 'self' } : { r: 'that' } }]
 	if ((m = s.match(new RegExp(`^record ${N} (\\w+?)s?$`, 'i')))) return [{ k: 'record', what: m[2].toLowerCase(), n: num(m[1]) }]
 	if ((m = s.match(/^(?:choose|place) an? (.+?) (?:card )?(?:in|from) your ranger discard and (?:place it on top of your fatigue stack|add it to your hand)$/i)))
 		return [{ k: 'discardTo', f: { words: words(m[1]) }, to: /hand/i.test(s) ? 'hand' : 'fatigue', pick: true }]
@@ -467,6 +492,7 @@ export function condition(raw: string): Cond | null {
 	}
 	if ((m = s.match(/^this \w+ is within reach of (?:a|any) ranger$/i))) return { c: 'selfZone', zone: 'reach' }
 	if (/^you suffered fatigue during this test$/i.test(s)) return { c: 'fatiguedTest' }
+	if (/^you failed this test$/i.test(s)) return { c: 'failedTest' }
 	if ((m = s.match(/^(?:it|that \w+) is (within reach|along the way)$/i))) return { c: 'thatZone', zone: /reach/i.test(m[1]) ? 'reach' : 'along' }
 	if ((m = s.match(/^it is (not )?a Ranger's turn$/i))) return { c: 'turns', negate: !!m[1] }
 	if ((m = s.match(/^you are (not )?spiritspeaking$/i))) return { c: 'spiritspeaking', negate: !!m[1] }
@@ -506,8 +532,8 @@ export function condition(raw: string): Cond | null {
 	if ((m = s.match(/^there is an odd number of \[(progress|harm)\] on this \w+$/i))) return { c: 'selfTok', what: m[1] as 'harm', odd: true }
 	if ((m = s.match(/^there (?:is|are) (\d+) or more (?!\[)(\w+)(?: tokens?)? on this \w+$/i))) return { c: 'selfTok', what: 'tokens', min: Number(m[1]) }
 	if ((m = s.match(/^there (?:is|are) no (?!\[)(\w+)(?: tokens?)?(?: remaining)? on this \w+$/i))) return { c: 'selfTok', what: 'tokens', max: 0 }
-	if ((m = s.match(/^there (?:is|are) (\d+) or more (?!\[)(\w+)(?: tokens?)? on the location$/i))) return { c: 'locTok', min: Number(m[1]) }
-	if ((m = s.match(/^there (?:is|are) no (?!\[)(\w+)(?: tokens?)? on the location$/i))) return { c: 'locTok', max: 0 }
+	if ((m = s.match(/^there (?:is|are) (\d+) or more (?!\[)(\w+)(?: tokens?)? on (?:the|this) location$/i))) return { c: 'locTok', min: Number(m[1]) }
+	if ((m = s.match(/^there (?:is|are) no (?!\[)(\w+)(?: tokens?)? on (?:the|this) location$/i))) return { c: 'locTok', max: 0 }
 	if ((m = s.match(/^you have (\d+) or more fatigue$/i))) return { c: 'youFatigue', min: Number(m[1]) }
 	if (/^a ranger is injured$/i.test(s)) return { c: 'injured' }
 	if ((m = s.match(/^(?:your|a|s) \[ranger\] is (not )?on this \w+$/i))) return { c: 'tokenOnSelf', negate: !!m[1] }

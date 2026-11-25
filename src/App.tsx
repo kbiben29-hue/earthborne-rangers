@@ -67,6 +67,7 @@ export default function App() {
 			missions: c.missions.map((m) => ({ id: m.id, side: m.side })),
 			rewards: c.rewards,
 			lead: c.lead,
+			packs: c.expansions ?? [],
 		})
 		setHistory([])
 		update({ ...c, game: g })
@@ -78,8 +79,8 @@ export default function App() {
 		body = (
 			<NewCampaign
 				cancel={() => setScreen({ s: 'home' })}
-				done={(name, rangers) => {
-					const c = newCampaign(name, rangers)
+				done={(name, rangers, expansions) => {
+					const c = newCampaign(name, rangers, expansions)
 					update(c)
 					setScreen({ s: 'campaign', id: c.id })
 				}}

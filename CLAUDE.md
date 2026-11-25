@@ -53,6 +53,8 @@ npm run data    # scripts/build-game-data.mjs → src/data/game.json
 - `src/campaign/campaign.ts` — campaign tracker, Ranger builder rules, `finishDay()`, localStorage.
 - `src/ui/` — `Board.tsx` (Holodeck-style table: felt, Ranger mats with piles, fanned hand with green glow on playable cards, click or drag to play, tap a card for its action bubble, right-click / "Look closer" to inspect; prompts float in `.tray`), `motion.ts` (cards fly between piles and zones, keyed by `data-uid` / `data-anchor`), `Screens.tsx` (home, new
   campaign, builder, campaign tracker, deck editor), `Card.tsx`, `styles.css`.
+- `src/ui/guide.tsx` — campaign guide window: fetches earthborne.build's index + campaign-guides.html from
+  raw.githubusercontent at runtime (never stored here) and shows the one entry (`.rules-page`).
 - `src/ui/coach.ts` — tutorial coach: `INTRO` pages, `coachFor()` (step text + a suggested move from a
   simple heuristic, shown as gold glow on act buttons / cards / hand), `eventNote()` one-off notes. The
   tutorial is a throwaway campaign (`tutorial: true`, fixed seed) started from Home.
@@ -78,7 +80,11 @@ npm run data    # scripts/build-game-data.mjs → src/data/game.json
    Conductor, Influential, Gratitude of the Valley, Superior Trail, Brightfruit Tree's response.
 2. Campaign tracker weather schedule per day (from the printed tracker) and day-30 handling.
 3. Online play with a friend (PeerJS, like Afterlife).
-4. Expansion order agreed with Kris: SoV (done, see above) → Spire in Bloom + Shadow of the Storm →
+4. Expansion order agreed with Kris: SoV (done, see above) → Spire in Bloom + Shadow of the Storm (in: campaign
+   `expansions`, `g.packs`, `setAll()` merges sets across packs, `buildPathDeck` reads the location's `pda`
+   (path deck assembly from earthborne.build data: extra cards, side decks `g.decks` — Spire, Otherworld,
+   detritus — "Use the X terrain", "no Valley cards"), links both ways, Thoroughfare / Nimbus terrains;
+   still by hand: effigies, Silverfin Docks river travel, Parental Bond, many SiB/SoS one-off effects) →
    Moments on the Path / Valley → Legacy of the Ancestors. Card text for all of them now comes from the
    earthborne.build data (below); what's left is the rules each box adds (locations on the map, path
    sets, missions, weather, Otherworld deck, effigies, Arcology…). Into the Maw: only its 5 Ranger cards exist.

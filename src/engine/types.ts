@@ -106,7 +106,7 @@ export type Prompt =
 	| { kind: 'manual'; title: string; text: string; ranger: number }
 	| { kind: 'aspect'; title: string; text: string; ranger: number; options: Aspect[]; key: string }
 	| { kind: 'guide'; entry: string; why: string; /** Pack of the card that sent you (which guide). */ pack?: string }
-	| { kind: 'scout'; ranger: number; deck: 'path' | 'ranger'; cards: string[]; drawAfter?: number }
+	| { kind: 'scout'; ranger: number; deck: 'path' | 'ranger' | `side:${string}`; cards: string[]; drawAfter?: number }
 	| { kind: 'equip'; ranger: number }
 	| { kind: 'travel' }
 	| { kind: 'dayOver'; reason: string }
@@ -116,6 +116,10 @@ export interface Game {
 	rng: { seed: number }
 	day: number
 	rangers: Ranger[]
+	/** Packs whose path cards are in use (Core + Spire in Bloom / Shadow of the Storm). */
+	packs?: string[]
+	/** Extra decks beside the path deck: the Spire deck, the Otherworld deck, the detritus deck… */
+	decks?: Record<string, string[]>
 	/** Aspiration records made today, by name ("seed", "improvement"…) and Ranger. */
 	records?: { ranger: number; what: string; n: number }[]
 	inst: Record<number, Inst>

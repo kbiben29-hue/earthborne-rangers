@@ -32,6 +32,7 @@ function rcText(c) {
 	if (c.text) lines.push(fix(c.text))
 	if (c.arrival_setup) lines.push('Arrival Setup:', fix(c.arrival_setup))
 	for (const sym of ['sun', 'mountain', 'crest']) if (c[`${sym}_challenge`]) lines.push(`[${sym}] ${fix(c[`${sym}_challenge`])}`)
+	if (c.type_id === 'location' && c.guide_entry != null && !/\[guide\]/.test(lines.join(' '))) lines.push(`[guide] ${c.guide_entry}`)
 	return lines.join('\n').trim()
 }
 const rcThreshold = (v) => (v == null ? null : String(v).replace(/\[per_ranger\]/g, '[perranger]'))
@@ -88,9 +89,12 @@ for (const [id, c] of Object.entries(db)) {
 	const b = c.B
 	if (!a?.name) continue
 	const type = a.type
+	// two-sided cards named "Front / Back" on DragnCards
+	const [nm1, nm2] = a.name.split(' / ')
+	if (nm2 && b) b.name = nm2
 	const o = {
 		id,
-		name: a.name,
+		name: nm1,
 		type,
 		set: a.set,
 		pack: a.pack_code,
@@ -178,6 +182,11 @@ for (const [id, c] of Object.entries(db)) {
 		if (b.presence != null && b.presence !== a.presence) o.B.presence = num(b.presence)
 		if (b.reveal) o.B.area = b.reveal === 'within_reach' ? 'reach' : 'along'
 	}
+	// path deck assembly instructions on locations (earthborne.build data)
+	if (type === 'Location') {
+		const r = rcFind(a.pack_code, nameA, 'location')
+		if (r?.path_deck_assembly) o.pda = r.path_deck_assembly.replace(/<f>[\s\S]*?<\/f>/g, '').replace(/<[^>]+>/g, '').trim()
+	}
 	o.qty = qty[id] ?? 1
 	if (type === 'Location') o.key = slug(a.name)
 	cards[id] = o
@@ -199,6 +208,15 @@ for (const c of Object.values(cards)) {
 	})
 	c.links = links
 	delete c.paths
+}
+// Links go both ways (expansion locations list their core neighbours, not the other way round).
+for (const c of Object.values(cards)) {
+	for (const l of c.links ?? []) {
+		const o = cards[l.to]
+		if (!o) continue
+		o.links ??= []
+		if (!o.links.some((x) => x.to === c.id)) o.links.push({ to: c.id, path: l.path })
+	}
 }
 
 // Card sets (path sets, ranger sets) with copies.

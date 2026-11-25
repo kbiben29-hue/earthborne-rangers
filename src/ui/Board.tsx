@@ -165,6 +165,30 @@ export function Board({
 			setSel({ kind: 'inst', uid })
 		}
 	}
+	// touch screens have no right-click: holding a card for a moment opens it big
+	const holdTimer = useRef(0)
+	const heldRef = useRef(false)
+	const holdToInspect = (uid: number) => ({
+		onPointerDown: (e: React.PointerEvent) => {
+			if (e.pointerType === 'mouse') return
+			heldRef.current = false
+			window.clearTimeout(holdTimer.current)
+			holdTimer.current = window.setTimeout(() => {
+				heldRef.current = true
+				inspect(uid)
+			}, 550)
+		},
+		onPointerUp: () => window.clearTimeout(holdTimer.current),
+		onPointerLeave: () => window.clearTimeout(holdTimer.current),
+		onPointerCancel: () => window.clearTimeout(holdTimer.current),
+		onClickCapture: (e: React.MouseEvent) => {
+			if (heldRef.current) {
+				heldRef.current = false
+				e.stopPropagation()
+				e.preventDefault()
+			}
+		},
+	})
 	const inspect = (uid: number, e?: React.MouseEvent) => {
 		e?.preventDefault()
 		setBubble(null)
@@ -178,7 +202,7 @@ export function Board({
 		const glow = hint.uids?.includes(uid) && (!choosing || choosing.options.includes(uid)) && (!pick || pick.ok(uid)) ? 'coach' : choosing?.options.includes(uid) ? 'pick' : pick?.ok(uid) ? 'pick' : usable(uid) ? 'use' : ''
 		return (
 			<div className={`stack ${small ? 'small' : ''}`} key={uid}>
-				<div onContextMenu={(e) => inspect(uid, e)} className={`glow-${glow}`}>
+				<div onContextMenu={(e) => inspect(uid, e)} className={`glow-${glow}`} {...holdToInspect(uid)}>
 					<CardTile g={g} inst={inst} small={small} onClick={(e) => tap(uid, e)} selected={(sel?.kind === 'inst' && sel.uid === uid) || bubble?.uid === uid} pickable={glow === 'pick'} />
 				</div>
 				{att.map((a) => (
@@ -224,15 +248,26 @@ export function Board({
 		const sx = e.clientX
 		const sy = e.clientY
 		let moved = false
+		let held = false
+		// hold a card (touch) to look at it closely
+		const timer = window.setTimeout(() => {
+			if (moved) return
+			held = true
+			setLifted(null)
+			setSel({ kind: 'hand', ranger: me, index: i })
+		}, 550)
 		const move = (ev: PointerEvent) => {
 			if (!moved && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 14) return
+			window.clearTimeout(timer)
 			moved = true
 			setDrag({ index: i, x: ev.clientX, y: ev.clientY })
 		}
 		const up = (ev: PointerEvent) => {
 			window.removeEventListener('pointermove', move)
 			window.removeEventListener('pointerup', up)
+			window.clearTimeout(timer)
 			setDrag(null)
+			if (held) return
 			const handTop = document.querySelector('.handbar')?.getBoundingClientRect().top ?? 9999
 			if (moved && ev.clientY < handTop - 20) {
 				// dropped on a card? (attachments go onto the card you drop them on)
@@ -278,7 +313,7 @@ export function Board({
 	const lastPath = g.pathDiscard[g.pathDiscard.length - 1]
 
 	return (
-		<div className={`board tabletop ${pick || choosing ? 'picking' : ''} ${drag ? 'dropping' : ''}`} ref={boardRef} onClick={(e) => e.target === e.currentTarget && setBubble(null)}>
+		<div className={`board tabletop ${pick || choosing ? 'picking' : ''} ${drag ? 'dropping' : ''}`} ref={boardRef} onContextMenu={(e) => e.preventDefault()} onClick={(e) => e.target === e.currentTarget && setBubble(null)}>
 			<header className="topbar">
 				<button className="ghost" onClick={() => setPanel(panel === 'menu' ? 'none' : 'menu')} title="Menu">
 					☰
@@ -317,6 +352,9 @@ export function Board({
 						<Pile label="Path" n={g.pathDeck.length} back="back-path.jpg" anchor="path-deck" onClick={() => setPanel('search')} />
 						<Pile label="Discard" n={g.pathDiscard.length} face={lastPath} anchor="path-discard" />
 						<Pile label="Challenge" n={g.challenge.length} back="back-challenge.jpg" anchor="challenge" />
+						{Object.entries(g.decks ?? {}).map(([name, d]) => (
+							<Pile key={name} label={name} n={d.length} back="back-path.jpg" anchor={`side-${name}`} />
+						))}
 					</div>
 				</section>
 				<section className="along" data-drop="play">
@@ -1333,7 +1371,7 @@ function Menu({
 				<div className="row-input">
 					<select value={mission} onChange={(e) => setMission(e.target.value)}>
 						<option value="">Add a mission…</option>
-						{MISSIONS_CORE().map((m) => (
+						{MISSIONS_CORE(g.packs ?? ['Core']).map((m) => (
 							<option key={m.id} value={m.id}>
 								{m.name}
 							</option>

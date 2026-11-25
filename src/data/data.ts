@@ -30,6 +30,8 @@ export interface CardDef {
 	type: string
 	set: string
 	pack: string
+	/** Path deck assembly instructions (locations). */
+	pda?: string
 	back: 'path' | 'player' | 'multi_sided' | 'challenge'
 	img: string
 	traits?: string
@@ -95,7 +97,15 @@ export const TERRAINS: Record<string, string> = {
 	swamp: 'Swamp',
 	ravine: 'Ravine',
 	river: 'River',
+	// Spire in Bloom / Shadow of the Storm
+	thoroughfare: 'Thoroughfare',
+	nimbus: 'Nimbus',
 }
+/** Expansions that add path cards, locations, missions and weather to the Valley (DragnCards pack codes). */
+export const PATH_PACKS: { code: string; name: string }[] = [
+	{ code: 'SiB', name: 'Spire in Bloom' },
+	{ code: 'SoS', name: 'Shadow of the Storm' },
+]
 
 /** Every copy of every card in a set, e.g. setCards('Core', 'Woods'). */
 export function setCards(pack: string, set: string): string[] {
@@ -103,7 +113,8 @@ export function setCards(pack: string, set: string): string[] {
 	return ids.flatMap((id) => Array(CARDS[id].qty || 1).fill(id))
 }
 
-export const coreLocations = () => Object.values(CARDS).filter((c) => c.type === 'Location' && c.pack === 'Core')
+export const coreLocations = (packs: string[] = ['Core']) => Object.values(CARDS).filter((c) => c.type === 'Location' && packs.includes(c.pack))
 export const WEATHER_CORE = ['01373', '01374', '01375', '01376']
-export const MISSIONS_CORE = () => Object.values(CARDS).filter((c) => c.type === 'Mission' && c.pack === 'Core')
+export const MISSIONS_CORE = (packs: string[] = ['Core']) => Object.values(CARDS).filter((c) => c.type === 'Mission' && packs.includes(c.pack))
+export const weathersOf = (packs: string[] = ['Core']) => Object.values(CARDS).filter((c) => c.type === 'Weather' && packs.includes(c.pack))
 export const LOCATION_START = '01378' // Lone Tree Station

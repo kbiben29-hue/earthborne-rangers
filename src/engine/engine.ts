@@ -215,7 +215,22 @@ function endDay(g: Game, reason: string, camp = false) {
 
 // ---------------------------------------------------------------- path cards
 
+/** A deck beside the path deck by name ("Spire", "Otherworld", "detritus"); null = use the path deck. */
+function sideDeck(g: Game, name: string): string[] | null {
+	const k = Object.keys(g.decks ?? {}).find((x) => x.toLowerCase() === name.toLowerCase())
+	return k ? g.decks![k] : null
+}
 function drawPathCard(g: Game, r: number, why = 'draws') {
+	// "When you would draw 1 path card, if your [ranger] is on this location/feature and there are cards remaining in the Spire deck, (you may) draw 1 card from the Spire deck instead."
+	const tok = g.rangers[r].token
+	for (const u of [g.location, ...(tok != null ? [tok] : [])]) {
+		const m = g.inst[u] ? flat(g.inst[u].id).match(/When you would draw (?:1|a) path card, if your \[ranger\] is on this \w+ and there are cards remaining in the ([\w' -]+?) deck, (?:you may )?draw (?:1|a) card from the [\w' -]+? deck instead/i) : null
+		const d = m && (tok === u) ? sideDeck(g, m[1]) : null
+		if (d?.length) {
+			putPathInPlay(g, d.shift()!, r, `draws from the ${m![1]} deck:`)
+			return
+		}
+	}
 	if (!g.pathDeck.length) {
 		if (!g.pathDiscard.length) {
 			log(g, 'The path deck and discard are empty.')
@@ -508,6 +523,8 @@ function evalCond(g: Game, c: Cond, job: Job): boolean | null {
 			return (g.phase === 'turns') !== !!c.negate
 		case 'spiritspeaking':
 			return !!g.rangers[job.ranger].spiritspeak !== !!c.negate
+		case 'failedTest':
+			return g.lastTest?.success === false
 		case 'not': {
 			const v = evalCond(g, c.x, job)
 			return v === null ? null : !v
@@ -729,7 +746,7 @@ function runStep(g: Game, s: Step & { when?: Cond }, job: Job, key: string): 'ok
 		}
 		case 'searchSet': {
 			const set = s.set.replace(/^the /i, '')
-			const pool = [...setCards('Core', set), ...setCards('Core', `The ${set}`)]
+			const pool = setAll(g, set)
 			const inUse = new Set([...g.pathDeck, ...g.pathDiscard, ...Object.values(g.inst).map((i) => i.id)])
 			for (let k = 0; k < (s.n ?? 1); k++) {
 				const id = pool.find((x) => fakeMatch(x, s.f) && !inUse.has(x)) ?? pool.find((x) => fakeMatch(x, s.f))
@@ -1016,6 +1033,47 @@ function runStep(g: Game, s: Step & { when?: Cond }, job: Job, key: string): 'ok
 			}
 			return 'ok'
 		}
+		case 'drawSide': {
+			const n = amount(g, s.amt, job)
+			for (let k = 0; k < n; k++) {
+				const d = sideDeck(g, s.deck)
+				if (d === null) drawPathCard(g, r)
+				else if (d.length) putPathInPlay(g, d.shift()!, r, `draws from the ${s.deck} deck:`)
+				else log(g, `The ${s.deck} deck is empty.`)
+			}
+			return 'ok'
+		}
+		case 'scoutSide': {
+			const n = amount(g, s.amt, job)
+			const d = sideDeck(g, s.deck) ?? g.pathDeck
+			if (n > 0 && d.length) {
+				g.queue.unshift({ kind: 'scout', ranger: r, deck: sideDeck(g, s.deck) ? `side:${s.deck}` : 'path', cards: d.slice(0, n) })
+				return 'pause'
+			}
+			return 'ok'
+		}
+		case 'sideToPath': {
+			const d = sideDeck(g, s.deck)
+			if (d?.length) {
+				const id = d.shift()!
+				g.pathDeck.unshift(id)
+				log(g, `The top card of the ${s.deck} deck goes on top of the path deck.`)
+			}
+			return 'ok'
+		}
+		case 'shuffleSide':
+			return each(
+				s.to,
+				(u) => {
+					const d = sideDeck(g, s.deck)
+					const id = g.inst[u].id
+					if (d === null || g.inst[u].kind !== 'path') return
+					delete g.inst[u]
+					g.decks![Object.keys(g.decks!).find((x) => x.toLowerCase() === s.deck.toLowerCase())!] = shuffle([...d, id], g.rng)
+					log(g, `${card(id).name} is shuffled into the ${s.deck} deck.`)
+				},
+				'a card',
+			)
 		case 'effect':
 			g.jobs.splice(1, 0, { ...job, eff: s.eff, stage: 'cond', i: 0, picks: {} })
 			return 'ok'
@@ -2016,21 +2074,79 @@ function startTravelPhase(g: Game) {
 	g.queue.push({ kind: 'travel' })
 	log(g, 'All Rangers have rested. Travel phase.')
 }
+/** Every copy of a set in every pack in play (expansions add cards to The Valley, General, Lone Tree Station…). */
+export function setAll(g: Game, name: string): string[] {
+	const packs = g.packs ?? ['Core']
+	const all = (n: string) => packs.flatMap((p) => setCards(p, n))
+	const out = all(name)
+	return out.length ? out : all(name.replace(/^The /, '')).length ? all(name.replace(/^The /, '')) : all(`The ${name}`)
+}
+const PDA_SETS: Record<string, string> = { Othrwoods: 'The Othrwoods', Otherwoods: 'The Othrwoods' }
 export function buildPathDeck(g: Game, locId: string, terrain: string) {
 	const loc = card(locId)
-	const terrainSet = TERRAINS[terrain]
-	const cards: string[] = terrainSet ? setCards('Core', terrainSet) : []
+	const pda = loc.pda ?? ''
+	let m: RegExpMatchArray | null
+	const t2 = (m = pda.match(/Use the (\w[\w-]*) terrain/i)) ? m[1].toLowerCase().replace(/-/g, '_') : terrain
+	const terrainSet = TERRAINS[t2]
+	const cards: string[] = terrainSet ? setAll(g, terrainSet) : []
+	const notes: string[] = []
+	g.decks = {}
 	if (loc.pivotal) {
-		const own = setCards('Core', loc.name).length ? setCards('Core', loc.name) : setCards('Core', loc.name.replace(/^The /, ''))
-		cards.push(...own)
-	} else cards.push(...shuffle(setCards('Core', 'The Valley'), g.rng).slice(0, 3))
+		const own = setAll(g, PDA_SETS[loc.name] ?? loc.name)
+		// "Do not add the Spire set to the path deck. Shuffle it separately … This is the Spire deck."
+		if ((m = pda.match(/Do not add the ([\w' -]+?) set to the path deck\. Shuffle it separately.*?This is the ([\w' -]+?) deck/i))) {
+			g.decks[m[2]] = shuffle(own, g.rng)
+			notes.push(`${m[2]} deck`)
+		} else cards.push(...own)
+	} else if (!/Do not add cards from the Valley set/i.test(pda)) {
+		const valley = shuffle(setAll(g, 'The Valley'), g.rng)
+		const must = pda.match(/1 of the 3 cards added from the Valley set must be ([\w' -]+?)\./i)?.[1]
+		const forced = must ? valley.find((id) => card(id).name.toLowerCase() === must.toLowerCase()) : undefined
+		const pick = forced ? [forced, ...valley.filter((id) => id !== forced).slice(0, 2)] : valley.slice(0, 3)
+		cards.push(...pick)
+	}
+	// "Search the General set for a Backalley Shortcut and shuffle it into the path deck."
+	for (const mm of pda.matchAll(/Search the ([\w' -]+?) set for an? ([\w' -]+?)(?: and (\d+) ([\w' -]+?))?,? and (?:shuffle it into|add them to) the path deck/gi)) {
+		const set = setAll(g, mm[1])
+		const want: [string, number][] = [[mm[2], 1], ...(mm[3] ? ([[mm[4], Number(mm[3])]] as [string, number][]) : [])]
+		for (const [nm, n] of want) {
+			const k = nm.toLowerCase().replace(/s$/, '')
+			const found = set.filter((id) => card(id).name.toLowerCase().replace(/s$/, '') === k).slice(0, n)
+			cards.push(...found)
+		}
+	}
+	// "Add 3 random cards from the Woods set to the path deck."
+	for (const mm of pda.matchAll(/Add (\d+) random cards from the ([\w' -]+?) set to the path deck/gi)) cards.push(...shuffle(setAll(g, mm[2]), g.rng).slice(0, Number(mm[1])))
+	// "Do not add X and Y to the path deck. Shuffle them together with 6 random cards from the Ravine set and 6 … This is the Otherworld deck."
+	if ((m = pda.match(/Do not add (.+?) to the path deck\. Shuffle them together with (.+?), then set them next to the path deck\. This is the ([\w' -]+?) deck/i))) {
+		const names = m[1].split(/,\s*| and /).map((x) => x.trim().toLowerCase())
+		const side: string[] = []
+		for (const nm of names) {
+			const k = cards.findIndex((id) => card(id).name.toLowerCase() === nm)
+			if (k >= 0) side.push(...cards.splice(k, 1))
+		}
+		for (const mm of m[2].matchAll(/(\d+) random cards from the ([\w' -]+?) set(?: \(other than ([^)]+)\))?/gi)) {
+			const not = (mm[3] ?? '').toLowerCase()
+			side.push(...shuffle(setAll(g, mm[2]).filter((id) => !not.includes(card(id).name.toLowerCase())), g.rng).slice(0, Number(mm[1])))
+		}
+		g.decks[m[3]] = shuffle(side, g.rng)
+		notes.push(`${m[3]} deck`)
+	}
+	// "Shuffle the Grassland, Lakeshore, and Old-Growth sets together and set them next to the path deck. This is the detritus deck."
+	if ((m = pda.match(/Shuffle the (.+?) sets together and set them next to the path deck\. This is the ([\w' -]+?) deck/i))) {
+		const sets = m[1].split(/,\s*(?:and\s+)?|\s+and\s+/).map((x) => x.trim()).filter(Boolean)
+		g.decks[m[2]] = shuffle(sets.flatMap((x) => setAll(g, x)), g.rng)
+		notes.push(`${m[2]} deck`)
+	}
+	if (pda && /effigies/i.test(pda)) g.queue.push({ kind: 'manual', title: loc.name, text: `Path deck assembly: ${pda} Attach any effigies you have recorded with the card tools.`, ranger: g.lead })
 	g.pathDeck = shuffle(cards, g.rng)
 	g.pathDiscard = []
-	log(g, `Path deck: ${terrainSet ?? terrain} set${loc.pivotal ? ` + ${loc.name} set` : ' + 3 Valley cards'} (${g.pathDeck.length} cards).`)
+	log(g, `Path deck: ${terrainSet ?? t2} set${loc.pivotal ? ` + ${loc.name} set` : /Do not add cards from the Valley set/i.test(pda) ? '' : ' + 3 Valley cards'} (${g.pathDeck.length} cards)${notes.length ? `; ${notes.join(', ')} beside it` : ''}.`)
 }
 function arrive(g: Game, locId: string) {
 	const c = card(locId)
-	const pb = parsedOf(locId, 'B')
+	const pB = parsedOf(locId, 'B')
+	const pb = pB.arrival.length || pB.guide ? pB : parsedOf(locId, 'A')
 	if (pb.guide) g.queue.push({ kind: 'guide', entry: pb.guide, why: `Arriving at ${c.name}`, pack: c.pack })
 	let who = g.lead
 	let first = true
@@ -2169,6 +2285,8 @@ export interface DaySetup {
 	missions: { id: string; side?: 'A' | 'B' }[]
 	rewards?: string[]
 	lead?: number
+	/** Expansions in play (pack codes): their path cards join the Valley, General and terrain sets. */
+	packs?: string[]
 }
 export function newDay(s: DaySetup): Game {
 	const g: Game = {
@@ -2197,6 +2315,7 @@ export function newDay(s: DaySetup): Game {
 		lingering: [],
 		jobs: [],
 		lastTest: null,
+		packs: ['Core', ...(s.packs ?? []).filter((p) => p !== 'Core')],
 	}
 	s.rangers.forEach((rs, r) => {
 		const aspects = card(rs.aspect).aspects!
@@ -2496,7 +2615,7 @@ function step(g: Game, it: Intent): string | null {
 			return null
 		case 'scouted': {
 			if (head?.kind !== 'scout') return 'Nothing to scout.'
-			const deck = head.deck === 'path' ? g.pathDeck : g.rangers[head.ranger].deck
+			const deck = head.deck === 'path' ? g.pathDeck : head.deck.startsWith('side:') ? (sideDeck(g, head.deck.slice(5)) ?? g.pathDeck) : g.rangers[head.ranger].deck
 			deck.splice(0, head.cards.length)
 			deck.unshift(...it.top)
 			deck.push(...it.bottom)

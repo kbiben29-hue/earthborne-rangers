@@ -1,5 +1,5 @@
 // The campaign (Lure of the Valley): the tracker sheet, Ranger decks and building a Ranger.
-import { card, CARDS, LOCATION_START, PREBUILT, type Aspect, type CardDef } from '../data/data'
+import { card, CARDS, LOCATION_START, PREBUILT, weathersOf, type Aspect, type CardDef } from '../data/data'
 import type { Game } from '../engine/types'
 
 export interface CampaignRanger {
@@ -56,6 +56,8 @@ export interface Campaign {
 	/** The learn-to-play day (coach on, not a real campaign). */
 	tutorial?: boolean
 	aspirations?: Aspiration[]
+	/** Expansions mixed into the Valley (pack codes: SiB, SoS). */
+	expansions?: string[]
 }
 
 export const LINGERING_INJURY = '01240'
@@ -66,7 +68,13 @@ export const WEATHER: { id: string; label: string }[] = [
 	{ id: '01376', label: 'Electric Fog (expert)' },
 ]
 
-export function newCampaign(name: string, rangers: CampaignRanger[]): Campaign {
+/** Weather cards to choose from: the core four plus any expansion weather. */
+export function weatherOptions(c: Pick<Campaign, 'expansions'>): { id: string; label: string }[] {
+	const extra = weathersOf(c.expansions ?? []).map((w) => ({ id: w.id, label: `${w.name}${w.B ? ` / ${w.B.name}` : ''} (${w.pack})` }))
+	return [...WEATHER, ...extra]
+}
+
+export function newCampaign(name: string, rangers: CampaignRanger[], expansions: string[] = []): Campaign {
 	return {
 		v: 1,
 		id: Math.random().toString(36).slice(2, 10),
@@ -86,6 +94,7 @@ export function newCampaign(name: string, rangers: CampaignRanger[]): Campaign {
 		entries: ['1'],
 		game: null,
 		lead: 0,
+		expansions,
 	}
 }
 
