@@ -72,7 +72,7 @@ export function Spotlight({ step, index, total, label, onNext, onBack, onSkip }:
 				<p>{step.body}</p>
 				{step.todo && !step.next && <p className="lesson-todo">👉 {step.todo}</p>}
 				<div className="btns">
-					{onBack && index > 0 && step.next && <button onClick={onBack}>Back</button>}
+					{onBack && step.next && <button onClick={onBack}>Back</button>}
 					{step.next && (
 						<button className="primary" onClick={onNext}>
 							{index + 1 < total ? 'Next' : 'Got it'}

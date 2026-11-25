@@ -93,6 +93,12 @@ export function Home({ campaigns, open, create, remove, tutorial }: { campaigns:
 
 // ------------------------------------------------------------------ new campaign
 
+/** The step Back goes to: the previous explanation, skipping steps you have already done. */
+function prevStep(steps: { next?: boolean; done?: boolean; target: string | null }[], k: number): number {
+	for (let j = Math.min(k, steps.length) - 1; j >= 0; j--) if (steps[j].next && !steps[j].done && (!steps[j].target || document.querySelector(steps[j].target!))) return j
+	return -1
+}
+
 export function NewCampaign({ done, cancel, guideFirst = false }: { done: (name: string, rangers: CampaignRanger[], expansions: string[], guided: boolean) => void; cancel: () => void; guideFirst?: boolean }) {
 	const [name, setName] = useState('Lure of the Valley')
 	const [guided, setGuided] = useState(guideFirst)
@@ -134,7 +140,7 @@ export function NewCampaign({ done, cancel, guideFirst = false }: { done: (name:
 		)
 	return (
 		<div className="screen">
-			{guided && gk < steps.length && <Spotlight step={gs} index={gk} total={steps.length} label="Setup guide" onNext={() => setGk(gk + 1)} onBack={() => setGk(Math.max(0, gk - 1))} onSkip={() => setGuided(false)} />}
+			{guided && gk < steps.length && <Spotlight step={gs} index={gk} total={steps.length} label="Setup guide" onNext={() => setGk(gk + 1)} onBack={prevStep(steps, gk) >= 0 ? () => setGk(prevStep(steps, gk)) : undefined} onSkip={() => setGuided(false)} />}
 			<div className="row-between">
 				<h2>New campaign</h2>
 				<button className={`ghost tut-toggle light ${guided ? 'on' : ''}`} onClick={() => setGuided(!guided)}>
@@ -396,7 +402,7 @@ export function CampaignView({ c, update, startDay, resume, back }: { c: Campaig
 	return (
 		<div className="screen campaign">
 			{guide && <GuideWindow entry={guide} onClose={() => setGuide(null)} rewards={c.rewards} onUnlock={(id) => set({ rewards: [...new Set([...c.rewards, id])] })} />}
-			{guiding && gk < steps.length && !guide && <Spotlight step={gs} index={gk} total={steps.length} label="Setup guide" onNext={() => setGk(gk + 1)} onBack={() => setGk(Math.max(0, gk - 1))} onSkip={() => set({ guided: false })} />}
+			{guiding && gk < steps.length && !guide && <Spotlight step={gs} index={gk} total={steps.length} label="Setup guide" onNext={() => setGk(gk + 1)} onBack={prevStep(steps, gk) >= 0 ? () => setGk(prevStep(steps, gk)) : undefined} onSkip={() => set({ guided: false })} />}
 			<div className="row-between">
 				<button onClick={back}>← Campaigns</button>
 				<h2>{c.name}</h2>

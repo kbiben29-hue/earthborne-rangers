@@ -682,6 +682,14 @@ function Lesson({ g, k, setK, picking }: { g: Game; k: number; setK: (n: number)
 	useEffect(() => {
 		if (s.done && s.done(g, { picking })) setK(at + 1)
 	})
+	// Back goes to the previous explanation that still makes sense (not a step you already did)
+	let back = at - 1
+	while (back >= 0) {
+		const b = LESSON[back]
+		const tgt = b.target?.(g)
+		if (b.next && !b.done?.(g, { picking }) && !b.skip?.(g) && (!b.target || (tgt && document.querySelector(tgt)))) break
+		back--
+	}
 	return (
 		<Spotlight
 			step={{ title: s.title, body: s.body, todo: s.todo, next: s.next, target: s.target?.(g) ?? null }}
@@ -689,7 +697,7 @@ function Lesson({ g, k, setK, picking }: { g: Game; k: number; setK: (n: number)
 			total={LESSON.length}
 			label="Lesson"
 			onNext={() => setK(at + 1)}
-			onBack={() => setK(Math.max(0, at - 1))}
+			onBack={back >= 0 ? () => setK(back) : undefined}
 			onSkip={() => setK(LESSON.length)}
 		/>
 	)
