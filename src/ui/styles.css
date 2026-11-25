@@ -2126,3 +2126,14 @@ body:has(.drawer-body) .lesson-card {
 	color: #2e6b4f;
 	font-weight: 700;
 }
+/* the table never scrolls as a whole page (iPad / iPhone dragging cards) */
+html:has(.board.tabletop),
+body:has(.board.tabletop) {
+	overflow: hidden;
+	overscroll-behavior: none;
+	height: 100%;
+}
+.board.tabletop .hand.fan,
+.board.tabletop .hcard {
+	touch-action: none;
+}

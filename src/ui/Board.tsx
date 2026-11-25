@@ -101,7 +101,7 @@ export function Board({
 	const [refZoom, setRefZoom] = useState<string | null>(null)
 	const [lifted, setLifted] = useState<{ index: number; x: number; y: number } | null>(null)
 	const boardRef = useRef<HTMLDivElement>(null)
-	useMotion(boardRef, g, me)
+	useMotion(boardRef, g, me, !!drag)
 	// how tall the hand + test buttons are, so pop-ups (tray, aim bar) sit just above them
 	useLayoutEffect(() => {
 		const root = boardRef.current
@@ -282,6 +282,9 @@ export function Board({
 		const sy = e.clientY
 		let moved = false
 		let held = false
+		// iPad / iPhone: while a card is held, the page must not scroll under your finger
+		const noScroll = (ev: TouchEvent) => ev.preventDefault()
+		window.addEventListener('touchmove', noScroll, { passive: false })
 		// hold a card (touch) to look at it closely
 		const timer = window.setTimeout(() => {
 			if (moved) return
@@ -298,6 +301,8 @@ export function Board({
 		const up = (ev: PointerEvent) => {
 			window.removeEventListener('pointermove', move)
 			window.removeEventListener('pointerup', up)
+			window.removeEventListener('pointercancel', up)
+			window.removeEventListener('touchmove', noScroll)
 			window.clearTimeout(timer)
 			setDrag(null)
 			if (held) return
@@ -317,6 +322,7 @@ export function Board({
 		}
 		window.addEventListener('pointermove', move)
 		window.addEventListener('pointerup', up)
+		window.addEventListener('pointercancel', up)
 	}
 
 	const startCommon = (key: string) => {

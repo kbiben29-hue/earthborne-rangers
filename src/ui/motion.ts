@@ -47,7 +47,7 @@ interface Seen {
 }
 const reduced = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
 
-export function useMotion(root: RefObject<HTMLElement | null>, g: Game, me = 0) {
+export function useMotion(root: RefObject<HTMLElement | null>, g: Game, me = 0, paused = false) {
 	const prev = useRef<Map<number, Seen> | null>(null)
 	const prevPiles = useRef<Piles | null>(null)
 	useLayoutEffect(() => {
@@ -67,7 +67,8 @@ export function useMotion(root: RefObject<HTMLElement | null>, g: Game, me = 0) 
 		})
 		const before = prev.current
 		prev.current = now
-		if (!before || reduced()) return
+		// while a card is being dragged nothing on the table moves by itself
+		if (!before || reduced() || paused) return
 		const anchor = (name: string) => host.querySelector<HTMLElement>(`[data-anchor="${name}"]`)?.getBoundingClientRect()
 		const from = (el: HTMLElement, r: DOMRect, to: DOMRect, ms: number, extra: Keyframe = {}) => {
 			const dx = r.left + r.width / 2 - (to.left + to.width / 2)
