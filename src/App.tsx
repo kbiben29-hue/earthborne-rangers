@@ -3,6 +3,7 @@ import { deleteCampaign, finishDay, loadAll, newCampaign, saveCampaign, tutorial
 import { migrate, newDay, tryApply } from './engine/engine'
 import type { Game, Intent } from './engine/types'
 import { Board } from './ui/Board'
+import { tutorialSetup } from './ui/lesson'
 import { CampaignView, Home, NewCampaign } from './ui/Screens'
 
 type Screen = { s: 'home' } | { s: 'new' } | { s: 'campaign'; id: string } | { s: 'day'; id: string }
@@ -69,6 +70,12 @@ export default function App() {
 			lead: c.lead,
 			packs: c.expansions ?? [],
 		})
+		if (c.tutorial) {
+			tutorialSetup(g)
+			try {
+				localStorage.setItem('earthborne.lesson', '0')
+			} catch {}
+		}
 		setHistory([])
 		update({ ...c, game: g })
 		setScreen({ s: 'day', id: c.id })

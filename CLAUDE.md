@@ -55,7 +55,11 @@ npm run data    # scripts/build-game-data.mjs → src/data/game.json
   campaign, builder, campaign tracker, deck editor), `Card.tsx`, `styles.css`.
 - `src/ui/guide.tsx` — campaign guide window: fetches earthborne.build's index + campaign-guides.html from
   raw.githubusercontent at runtime (never stored here) and shows the one entry (`.rules-page`).
-- `src/ui/coach.ts` — tutorial coach: `INTRO` pages, `coachFor()` (step text + a suggested move from a
+- `src/ui/lesson.ts` — the guided lesson for complete beginners: `tutorialSetup()` stacks hand, path deck and
+  challenge deck (UI side, at day start) so the day always goes the same way; `LESSON` steps each point at one
+  thing (CSS selector → gold spotlight, card placed beside it), explain it and wait (`done`) or show Next;
+  `skip` drops steps whose moment passed. The 🎓 top-bar button turns the tutorial (lesson + coach) on/off.
+- `src/ui/coach.ts` — tutorial coach (after the lesson): `INTRO` pages, `coachFor()` (step text + a suggested move from a
   simple heuristic, shown as gold glow on act buttons / cards / hand), `eventNote()` one-off notes. The
   tutorial is a throwaway campaign (`tutorial: true`, fixed seed) started from Home.
 

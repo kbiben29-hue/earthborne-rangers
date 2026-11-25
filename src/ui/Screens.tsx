@@ -41,7 +41,7 @@ export function Home({ campaigns, open, create, remove, tutorial }: { campaigns:
 			</header>
 			<div className="panel learn">
 				<h3>New to Earthborne Rangers?</h3>
-				<p>Play a coached practice day: one Ranger, starting at Lone Tree Station. The coach explains each step — path cards, tests, fatigue, the challenge deck, travel — and makes a good move glow.</p>
+				<p>Never played before? This practice day shows you everything step by step: it points at each part of the table, explains it in plain words and lets you do each move yourself — tests, effort, fatigue, playing cards, resting and travelling. Turn it off any time with the 🎓 button.</p>
 				{campaigns.some((c) => c.tutorial && c.game && !c.game.ended) && (
 					<button className="big" onClick={() => open(campaigns.find((c) => c.tutorial)!)}>
 						Continue the tutorial

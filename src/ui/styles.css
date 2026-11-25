@@ -1554,7 +1554,8 @@ details summary {
 }
 .aimbar {
 	position: fixed;
-	top: 54px;
+	/* just above the hand and test buttons, so it never covers the cards you have to tap */
+	bottom: calc(var(--cw) * 1.6 + 64px);
 	left: 50%;
 	transform: translateX(-50%);
 	background: linear-gradient(180deg, #ffd45a, #e6ad21);
@@ -1796,7 +1797,7 @@ details summary {
 	justify-content: center;
 	align-items: center;
 	background: rgba(10, 18, 14, 0.72);
-	z-index: 95;
+	z-index: 99;
 }
 .guide-sheet {
 	background: #f7f1e3;
@@ -1915,6 +1916,7 @@ button.link {
 	border-radius: 6px;
 }
 .drawer.ref-zoom {
+	z-index: 99;
 	justify-content: center;
 	align-items: center;
 	background: rgba(10, 18, 14, 0.75);
@@ -1969,4 +1971,132 @@ img,
 }
 .bubble.floating {
 	transform: none;
+}
+
+/* ---------------- guided lesson */
+.lesson-spot {
+	position: fixed;
+	z-index: 70;
+	border-radius: 12px;
+	box-shadow: 0 0 0 4px #ffd45a, 0 0 0 0 rgba(255, 194, 58, 0), 0 0 0 9999px rgba(8, 14, 10, 0.6);
+	pointer-events: none;
+	transition: left 0.25s, top 0.25s, width 0.25s, height 0.25s;
+	animation: spot-pulse 1.4s ease-in-out infinite alternate;
+}
+@keyframes spot-pulse {
+	to {
+		box-shadow: 0 0 0 6px #ffd45a, 0 0 22px 8px rgba(255, 194, 58, 0.9), 0 0 0 9999px rgba(8, 14, 10, 0.6);
+	}
+}
+.lesson-dim {
+	position: fixed;
+	inset: 0;
+	z-index: 70;
+	background: rgba(8, 14, 10, 0.6);
+	pointer-events: none;
+}
+.lesson-card {
+	position: fixed;
+	z-index: 96;
+	width: min(380px, calc(100vw - 16px));
+	background: var(--paper);
+	color: var(--ink);
+	border-radius: 14px;
+	border-top: 5px solid var(--gold);
+	padding: 12px 14px;
+	box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+}
+.lesson-card small {
+	color: var(--muted);
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+	font-size: 0.7rem;
+}
+.lesson-card h3 {
+	margin: 2px 0 4px;
+	color: var(--forest);
+}
+.lesson-card p {
+	margin: 4px 0;
+	line-height: 1.4;
+}
+.lesson-card .lesson-todo {
+	font-weight: 700;
+	color: #7a4b00;
+}
+.lesson-card .btns {
+	display: flex;
+	gap: 6px;
+	flex-wrap: wrap;
+	margin-top: 6px;
+}
+/* the guide window and zoomed reference cards cover the lesson */
+body:has(.guide-window) .lesson-card,
+body:has(.guide-window) .lesson-spot,
+body:has(.guide-window) .lesson-dim,
+body:has(.ref-zoom) .lesson-card,
+body:has(.drawer-body) .lesson-card {
+	display: none;
+}
+
+@media (max-width: 760px) {
+	.aimbar {
+		bottom: calc(var(--cw) * 1.45 + 104px);
+		font-size: 0.9rem;
+		padding: 6px 12px;
+	}
+}
+
+/* pop-ups sit right above the hand and the test buttons (--handbar is measured) */
+.board.tabletop .tray {
+	bottom: calc(var(--handbar, 200px) + 8px);
+	max-height: calc(100dvh - var(--handbar, 200px) - 64px);
+}
+.aimbar {
+	bottom: calc(var(--handbar, 200px) + 10px);
+}
+@media (max-width: 760px) {
+	.board.tabletop .tray {
+		bottom: calc(var(--handbar, 200px) + 6px);
+		max-height: calc(100dvh - var(--handbar, 200px) - 60px);
+	}
+	.aimbar {
+		bottom: calc(var(--handbar, 200px) + 8px);
+	}
+}
+/* while you are choosing a card, the last test result steps aside */
+.board.tabletop.picking .tray .last-test {
+	display: none;
+}
+.tut-toggle {
+	font-size: 0.85rem;
+	white-space: nowrap;
+	border-radius: 999px;
+	padding: 2px 10px;
+	opacity: 0.75;
+}
+.tut-toggle.on {
+	opacity: 1;
+	background: #ffd45a33;
+	color: #ffe08a;
+}
+@media (max-width: 760px) {
+	.tut-label {
+		display: none;
+	}
+}
+.last-test {
+	cursor: pointer;
+}
+.last-test.fading {
+	animation: flipin 0.5s ease-out, fade-late 4.5s linear;
+}
+@keyframes fade-late {
+	0%,
+	85% {
+		opacity: 1;
+	}
+	100% {
+		opacity: 0.4;
+	}
 }

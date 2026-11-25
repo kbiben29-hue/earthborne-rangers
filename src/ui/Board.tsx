@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useMotion } from './motion'
 import { coachFor, eventNote, INTRO, type CoachStep } from './coach'
 import { GUIDE_PACK, GuideWindow } from './guide'
+import { LESSON, lessonAt } from './lesson'
 import { ASPECTS, card, CARDS, CHALLENGE, MISSIONS_CORE, SETS, TERRAINS, type Aspect } from '../data/data'
 import {
 	baseTests,
@@ -64,7 +65,24 @@ export function Board({
 	coach?: boolean
 }) {
 	const [sel, setSel] = useState<Sel>(null)
-	const [intro, setIntro] = useState(() => (coach && g.round <= 1 && g.log.length < 30 ? 0 : -1))
+	// the guided lesson (tutorial): step index, kept across reloads
+	const [lk, setLkRaw] = useState(() => {
+		if (!coach) return LESSON.length
+		try {
+			return Number(localStorage.getItem('earthborne.lesson') ?? LESSON.length)
+		} catch {
+			return 0
+		}
+	})
+	const setLk = (n: number) => {
+		setLkRaw(n)
+		try {
+			localStorage.setItem('earthborne.lesson', String(n))
+		} catch {}
+	}
+	const [tutOff, setTutOff] = useState(false)
+	const lessonOn = coach && !tutOff && lk < LESSON.length
+	const [intro, setIntro] = useState(-1)
 	const [coachOn, setCoachOn] = useState(coach)
 	const [coachMin, setCoachMin] = useState(false)
 	const [seen, setSeen] = useState<Set<string>>(() => new Set())
@@ -80,6 +98,17 @@ export function Board({
 	const [lifted, setLifted] = useState<{ index: number; x: number; y: number } | null>(null)
 	const boardRef = useRef<HTMLDivElement>(null)
 	useMotion(boardRef, g, me)
+	// how tall the hand + test buttons are, so pop-ups (tray, aim bar) sit just above them
+	useLayoutEffect(() => {
+		const root = boardRef.current
+		const hb = root?.querySelector<HTMLElement>('.handbar')
+		if (!root || !hb) return
+		const set = () => root.style.setProperty('--handbar', `${hb.offsetHeight}px`)
+		set()
+		const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(set) : null
+		ro?.observe(hb)
+		return () => ro?.disconnect()
+	}, [])
 	const head = g.queue[0]
 
 	useEffect(() => {
@@ -114,7 +143,7 @@ export function Board({
 			setSeen((s) => new Set(s).add(n.key))
 		}
 	}, [g, coachOn, seen])
-	const step = coachOn ? coachFor(g, me, seen) : null
+	const step = coachOn && !lessonOn ? coachFor(g, me, seen) : null
 	const hint = step?.hint ?? {}
 	const coachBtn = (k: string) => (hint.buttons?.includes(k) ? 'coach' : '')
 
@@ -322,6 +351,17 @@ export function Board({
 					<b>Day {g.day}</b> · Round {g.round}
 				</div>
 				<div className="phase-pill">{banner}</div>
+				<button
+					className={`ghost tut-toggle ${(coach ? !tutOff : coachOn) ? 'on' : ''}`}
+					onClick={() => {
+						const on = coach ? tutOff : !coachOn
+						setTutOff(!on)
+						setCoachOn(on)
+					}}
+					title={(coach ? !tutOff : coachOn) ? 'Turn the tutorial off' : 'Turn the tutorial on'}
+				>
+					🎓<span className="tut-label">{(coach ? !tutOff : coachOn) ? ' Tutorial on' : ' Tutorial off'}</span>
+				</button>
 				<button className="ghost" onClick={undo} disabled={!canUndo} title="Undo">
 					↶
 				</button>
@@ -410,12 +450,12 @@ export function Board({
 						<span className="acts">
 							{R.spiritspeak && <span className="spirit-tag" title="Spiritspeaking: Spirit Speaker tests replace the common tests until your role readies">✧ Spiritspeaking</span>}
 							{baseTests(g, me).map((t) => (
-								<button key={t.key} className={`act act-${t.aspect} ${coachBtn(t.key)}`} disabled={!myTurnOk || R.energy[t.aspect] < 1} onClick={() => startCommon(t.key)} title={t.text}>
+								<button key={t.key} data-act={t.key} className={`act act-${t.aspect} ${coachBtn(t.key)}`} disabled={!myTurnOk || R.energy[t.aspect] < 1} onClick={() => startCommon(t.key)} title={t.text}>
 									<b>{t.aspect}</b>
 									{t.name}
 								</button>
 							))}
-							<button disabled={R.rested} onClick={() => dispatch({ t: 'rest', ranger: me })} className={`act rest ${coachBtn('rest')}`} title="Done for this round">
+							<button disabled={R.rested} data-act="rest" onClick={() => dispatch({ t: 'rest', ranger: me })} className={`act rest ${coachBtn('rest')}`} title="Done for this round">
 								<b>✓</b>Rest
 							</button>
 						</span>
@@ -431,6 +471,7 @@ export function Board({
 						return (
 							<div
 								key={`${id}#${nth}`}
+								data-card={id}
 								className={`hcard ${can ? 'glow-play' : ''} ${hint.hand?.includes(i) ? 'coach' : ''} ${drag?.index === i ? 'dragging' : ''} ${lifted?.index === i ? 'lifted' : ''}`}
 								style={{ ['--r' as string]: `${(i - mid) * Math.min(4, 24 / n)}deg`, ['--y' as string]: `${Math.abs(i - mid) ** 1.6 * 2}px` }}
 								onPointerDown={(e) => onHandDown(i, e)}
@@ -502,7 +543,7 @@ export function Board({
 			)}
 
 			<div className="tray" data-anchor="tray">
-				{coachOn && intro < 0 && (step || note) && (
+				{coachOn && !lessonOn && intro < 0 && (step || note) && (
 					<div className={`coach-panel ${coachMin ? 'min' : ''}`}>
 						{coachMin ? (
 							<button className="coach-pill" onClick={() => setCoachMin(false)}>
@@ -536,7 +577,7 @@ export function Board({
 						)}
 					</div>
 				)}
-				<LastTest g={g} />
+				<LastTest g={g} keep={lessonOn} />
 				{head && !(choosing && choosing.max === 1) && (
 					<div className={coachOn && hint.buttons?.length ? `coached ${hint.buttons.map((b) => `c-${b}`).join(' ')}` : ''}>
 						<PromptPanel g={g} head={head} dispatch={dispatch} setPick={setPick} onDayOver={onDayOver} hooks={hooks} coachEnergy={coachOn ? hint.energy : undefined} tutorial={coach} />
@@ -565,6 +606,8 @@ export function Board({
 					</button>
 				</Floating>
 			)}
+
+			{lessonOn && <Lesson g={g} k={lk} setK={setLk} picking={!!pick} />}
 
 			{refZoom && (
 				<div className="drawer ref-zoom" onClick={() => setRefZoom(null)}>
@@ -621,6 +664,103 @@ export function Board({
 				</div>
 			)}
 		</div>
+	)
+}
+
+/** The guided lesson: dims the table except the part being explained, and says what to do. */
+function Lesson({ g, k, setK, picking }: { g: Game; k: number; setK: (n: number) => void; picking: boolean }) {
+	const at = lessonAt(g, k)
+	const s = LESSON[Math.min(at, LESSON.length - 1)]
+	const [rect, setRect] = useState<DOMRect | null>(null)
+	const card = useRef<HTMLDivElement>(null)
+	const [cardH, setCardH] = useState(160)
+	useEffect(() => {
+		if (at !== k) setK(at)
+	}, [at, k])
+	// done by the player? go on to the next step
+	useEffect(() => {
+		if (s.done && s.done(g, { picking })) setK(at + 1)
+	})
+	// bring the target into view (the table scrolls on small screens)
+	useEffect(() => {
+		const t = window.setTimeout(() => {
+			const sel = s.target?.(g)
+			const el = sel ? document.querySelector<HTMLElement>(sel) : null
+			const felt = document.querySelector<HTMLElement>('.felt')
+			if (el && el.closest('.tray')) {
+				el.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+				return
+			}
+			if (!el || !felt || !felt.contains(el)) return
+			const r = el.getBoundingClientRect()
+			const f = felt.getBoundingClientRect()
+			const hb = document.querySelector('.handbar')?.getBoundingClientRect().top ?? window.innerHeight
+			if (r.top < f.top || r.bottom > Math.min(f.bottom, hb)) el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+		}, 120)
+		return () => window.clearTimeout(t)
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [at, s.target?.(g)])
+	// follow the target on screen
+	useEffect(() => {
+		let raf = 0
+		const tick = () => {
+			const sel = s.target?.(g)
+			const el = sel ? document.querySelector<HTMLElement>(sel) : null
+			const r = el?.getBoundingClientRect() ?? null
+			setRect((old) => (r && old && Math.abs(old.left - r.left) < 1 && Math.abs(old.top - r.top) < 1 && Math.abs(old.width - r.width) < 1 && Math.abs(old.height - r.height) < 1 ? old : r))
+			if (card.current) setCardH(card.current.offsetHeight)
+			raf = requestAnimationFrame(tick)
+		}
+		tick()
+		return () => cancelAnimationFrame(raf)
+	}, [s, g])
+	const vh = window.innerHeight
+	const vw = window.innerWidth
+	const pad = 6
+	let style: React.CSSProperties = { left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }
+	if (rect) {
+		// try below, above, left and right of the target; keep the card off what it points at
+		const w = Math.min(380, vw - 16)
+		const h = cardH
+		const cx = Math.min(Math.max(8, rect.left + rect.width / 2 - w / 2), vw - w - 8)
+		const cy = Math.min(Math.max(8, rect.top + rect.height / 2 - h / 2), vh - h - 8)
+		const spots = [
+			{ left: cx, top: rect.bottom + 14 },
+			{ left: cx, top: rect.top - 14 - h },
+			{ left: rect.left - 14 - w, top: cy },
+			{ left: rect.right + 14, top: cy },
+		]
+		const fits = (p: { left: number; top: number }) => p.left >= 8 && p.top >= 8 && p.left + w <= vw - 8 && p.top + h <= vh - 8
+		const best = spots.find(fits) ?? { left: cx, top: rect.top + rect.height / 2 < vh / 2 ? vh - h - 8 : 8 }
+		style = { left: best.left, top: best.top, width: w }
+	}
+	return (
+		<>
+			{rect ? (
+				<div className="lesson-spot" style={{ left: rect.left - pad, top: rect.top - pad, width: rect.width + pad * 2, height: rect.height + pad * 2 }} />
+			) : (
+				<div className="lesson-dim" />
+			)}
+			<div className="lesson-card" ref={card} style={style}>
+				<small>
+					Lesson · {Math.min(at, LESSON.length - 1) + 1} / {LESSON.length}
+				</small>
+				<h3>{s.title}</h3>
+				<p>{s.body}</p>
+				{s.todo && !s.next && <p className="lesson-todo">👉 {s.todo}</p>}
+				<div className="btns">
+					{at > 0 && s.next && <button onClick={() => setK(Math.max(0, at - 1))}>Back</button>}
+					{s.next && (
+						<button className="primary" onClick={() => setK(at + 1)}>
+							{at + 1 < LESSON.length ? 'Next' : 'Let’s play'}
+						</button>
+					)}
+					<button className="ghost" onClick={() => setK(LESSON.length)}>
+						Skip lesson
+					</button>
+				</div>
+			</div>
+		</>
 	)
 }
 
@@ -788,7 +928,7 @@ function Commit({ g, head, dispatch, coachEnergy }: { g: Game; head: Extract<Pro
 			</h3>
 			{head.target != null && g.inst[head.target] && <p className="sub">Interacting with {nameOf(g, head.target)}.</p>}
 			{hurting.length > 0 && (
-				<p className={fat ? 'warn' : 'sub'}>
+				<p className={fat ? 'warn' : 'sub'} data-tut="in-way">
 					In the way: {hurting.map((u) => `${nameOf(g, u)} (${presence(g, u)})`).join(', ')} → you suffer {fat} fatigue.
 				</p>
 			)}
@@ -814,7 +954,7 @@ function Commit({ g, head, dispatch, coachEnergy }: { g: Game; head: Extract<Pro
 					)}
 				</div>
 			)}
-			<div className="stepper">
+			<div className="stepper" data-tut="energy">
 				<span>
 					{aspect} energy <small>(have {max})</small>
 				</span>
@@ -823,7 +963,7 @@ function Commit({ g, head, dispatch, coachEnergy }: { g: Game; head: Extract<Pro
 				<button onClick={() => setEnergy(Math.min(max, energy + 1))}>+</button>
 			</div>
 			<p className="sub">Discard cards with {APPROACH_ICON[head.approach]} icons for more effort:</p>
-			<div className="hand mini">
+			<div className="hand mini" data-tut="commit-hand">
 				{R.hand.map((id, i) => {
 					if (respIdx.has(i)) return null
 					const n = iconsOf(i)
@@ -1010,12 +1150,26 @@ function Manual({ head, dispatch }: { head: Extract<Prompt, { kind: 'manual' }>;
 	)
 }
 
-export function LastTest({ g }: { g: Game }) {
+export function LastTest({ g, keep = false }: { g: Game; keep?: boolean }) {
 	const t = g.lastTest
-	if (!t) return null
+	// the result shows for a few seconds after each test, then gets out of the way (tap it to hide it sooner)
+	const stamp = t ? `${t.name}|${t.ranger}|${t.challenge}|${t.effort}|${g.round}|${g.challengeDiscard.length}|${g.challenge.length}` : ''
+	const [hidden, setHidden] = useState<string | null>(null)
+	const [seenAt, setSeenAt] = useState<string>('')
+	useEffect(() => {
+		if (!stamp || stamp === seenAt) return
+		setSeenAt(stamp)
+		setHidden(null)
+	}, [stamp, seenAt])
+	useEffect(() => {
+		if (!stamp || keep) return
+		const tm = window.setTimeout(() => setHidden(stamp), 4500)
+		return () => window.clearTimeout(tm)
+	}, [stamp, keep])
+	if (!t || (hidden === stamp && !keep)) return null
 	const ch = CHALLENGE[t.challenge]
 	return (
-		<div className={`last-test ${t.success ? 'ok' : 'bad'}`}>
+		<div className={`last-test ${t.success ? 'ok' : 'bad'} ${keep ? '' : 'fading'}`} onClick={() => setHidden(stamp)} title="Tap to hide">
 			<img src={imgUrl(`${ch.id}.jpg`)} alt="Challenge card" />
 			<div>
 				<b>
