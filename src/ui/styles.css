@@ -2100,3 +2100,12 @@ body:has(.drawer-body) .lesson-card {
 		opacity: 0.4;
 	}
 }
+.tut-toggle.light {
+	color: var(--forest, #2e4a3d);
+	border: 1px solid #0002;
+	opacity: 1;
+}
+.tut-toggle.light.on {
+	background: #ffd45a;
+	color: #2a1c00;
+}

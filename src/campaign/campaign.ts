@@ -56,6 +56,8 @@ export interface Campaign {
 	/** The learn-to-play day (coach on, not a real campaign). */
 	tutorial?: boolean
 	aspirations?: Aspiration[]
+	/** Guide this campaign's setup and first day step by step. */
+	guided?: boolean
 	/** Expansions mixed into the Valley (pack codes: SiB, SoS). */
 	expansions?: string[]
 }

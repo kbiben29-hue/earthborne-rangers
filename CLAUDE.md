@@ -59,6 +59,8 @@ npm run data    # scripts/build-game-data.mjs → src/data/game.json
   challenge deck (UI side, at day start) so the day always goes the same way; `LESSON` steps each point at one
   thing (CSS selector → gold spotlight, card placed beside it), explain it and wait (`done`) or show Next;
   `skip` drops steps whose moment passed. The 🎓 top-bar button turns the tutorial (lesson + coach) on/off.
+- `src/ui/spotlight.tsx` — generic spotlight + explanation card (used by the lesson and the setup guides on the
+  New campaign screen and the day-1 campaign page; `Campaign.guided` also turns the coach on for day 1).
 - `src/ui/coach.ts` — tutorial coach (after the lesson): `INTRO` pages, `coachFor()` (step text + a suggested move from a
   simple heuristic, shown as gold glow on act buttons / cards / hand), `eventNote()` one-off notes. The
   tutorial is a throwaway campaign (`tutorial: true`, fixed seed) started from Home.

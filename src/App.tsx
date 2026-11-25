@@ -86,8 +86,9 @@ export default function App() {
 		body = (
 			<NewCampaign
 				cancel={() => setScreen({ s: 'home' })}
-				done={(name, rangers, expansions) => {
-					const c = newCampaign(name, rangers, expansions)
+				guideFirst={!campaigns.some((x) => !x.tutorial)}
+				done={(name, rangers, expansions, guided) => {
+					const c = { ...newCampaign(name, rangers, expansions), guided }
 					update(c)
 					setScreen({ s: 'campaign', id: c.id })
 				}}
@@ -103,7 +104,8 @@ export default function App() {
 				undo={undo}
 				canUndo={history.length > 0}
 				onExit={() => setScreen(current.tutorial ? { s: 'home' } : { s: 'campaign', id: current.id })}
-				coach={!!current.tutorial}
+				coach={!!current.tutorial || (!!current.guided && current.day === 1)}
+				lesson={!!current.tutorial}
 				onDayOver={() => {
 					if (current.tutorial) {
 						deleteCampaign(current.id)

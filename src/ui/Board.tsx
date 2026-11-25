@@ -3,6 +3,7 @@ import { useMotion } from './motion'
 import { coachFor, eventNote, INTRO, type CoachStep } from './coach'
 import { GUIDE_PACK, GuideWindow } from './guide'
 import { LESSON, lessonAt } from './lesson'
+import { Spotlight } from './spotlight'
 import { ASPECTS, card, CARDS, CHALLENGE, MISSIONS_CORE, SETS, TERRAINS, type Aspect } from '../data/data'
 import {
 	baseTests,
@@ -54,6 +55,7 @@ export function Board({
 	onDayOver,
 	hooks,
 	coach = false,
+	lesson = false,
 }: {
 	g: Game
 	dispatch: Dispatch
@@ -63,11 +65,13 @@ export function Board({
 	onDayOver: () => void
 	hooks: CampaignHooks
 	coach?: boolean
+	/** The beginner lesson (tutorial only). */
+	lesson?: boolean
 }) {
 	const [sel, setSel] = useState<Sel>(null)
 	// the guided lesson (tutorial): step index, kept across reloads
 	const [lk, setLkRaw] = useState(() => {
-		if (!coach) return LESSON.length
+		if (!lesson) return LESSON.length
 		try {
 			return Number(localStorage.getItem('earthborne.lesson') ?? LESSON.length)
 		} catch {
@@ -81,7 +85,7 @@ export function Board({
 		} catch {}
 	}
 	const [tutOff, setTutOff] = useState(false)
-	const lessonOn = coach && !tutOff && lk < LESSON.length
+	const lessonOn = lesson && !tutOff && lk < LESSON.length
 	const [intro, setIntro] = useState(-1)
 	const [coachOn, setCoachOn] = useState(coach)
 	const [coachMin, setCoachMin] = useState(false)
@@ -580,7 +584,7 @@ export function Board({
 				<LastTest g={g} keep={lessonOn} />
 				{head && !(choosing && choosing.max === 1) && (
 					<div className={coachOn && hint.buttons?.length ? `coached ${hint.buttons.map((b) => `c-${b}`).join(' ')}` : ''}>
-						<PromptPanel g={g} head={head} dispatch={dispatch} setPick={setPick} onDayOver={onDayOver} hooks={hooks} coachEnergy={coachOn ? hint.energy : undefined} tutorial={coach} />
+						<PromptPanel g={g} head={head} dispatch={dispatch} setPick={setPick} onDayOver={onDayOver} hooks={hooks} coachEnergy={coachOn ? hint.energy : undefined} tutorial={lesson} />
 					</div>
 				)}
 			</div>
@@ -671,9 +675,6 @@ export function Board({
 function Lesson({ g, k, setK, picking }: { g: Game; k: number; setK: (n: number) => void; picking: boolean }) {
 	const at = lessonAt(g, k)
 	const s = LESSON[Math.min(at, LESSON.length - 1)]
-	const [rect, setRect] = useState<DOMRect | null>(null)
-	const card = useRef<HTMLDivElement>(null)
-	const [cardH, setCardH] = useState(160)
 	useEffect(() => {
 		if (at !== k) setK(at)
 	}, [at, k])
@@ -681,86 +682,16 @@ function Lesson({ g, k, setK, picking }: { g: Game; k: number; setK: (n: number)
 	useEffect(() => {
 		if (s.done && s.done(g, { picking })) setK(at + 1)
 	})
-	// bring the target into view (the table scrolls on small screens)
-	useEffect(() => {
-		const t = window.setTimeout(() => {
-			const sel = s.target?.(g)
-			const el = sel ? document.querySelector<HTMLElement>(sel) : null
-			const felt = document.querySelector<HTMLElement>('.felt')
-			if (el && el.closest('.tray')) {
-				el.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-				return
-			}
-			if (!el || !felt || !felt.contains(el)) return
-			const r = el.getBoundingClientRect()
-			const f = felt.getBoundingClientRect()
-			const hb = document.querySelector('.handbar')?.getBoundingClientRect().top ?? window.innerHeight
-			if (r.top < f.top || r.bottom > Math.min(f.bottom, hb)) el.scrollIntoView({ block: 'center', behavior: 'smooth' })
-		}, 120)
-		return () => window.clearTimeout(t)
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [at, s.target?.(g)])
-	// follow the target on screen
-	useEffect(() => {
-		let raf = 0
-		const tick = () => {
-			const sel = s.target?.(g)
-			const el = sel ? document.querySelector<HTMLElement>(sel) : null
-			const r = el?.getBoundingClientRect() ?? null
-			setRect((old) => (r && old && Math.abs(old.left - r.left) < 1 && Math.abs(old.top - r.top) < 1 && Math.abs(old.width - r.width) < 1 && Math.abs(old.height - r.height) < 1 ? old : r))
-			if (card.current) setCardH(card.current.offsetHeight)
-			raf = requestAnimationFrame(tick)
-		}
-		tick()
-		return () => cancelAnimationFrame(raf)
-	}, [s, g])
-	const vh = window.innerHeight
-	const vw = window.innerWidth
-	const pad = 6
-	let style: React.CSSProperties = { left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }
-	if (rect) {
-		// try below, above, left and right of the target; keep the card off what it points at
-		const w = Math.min(380, vw - 16)
-		const h = cardH
-		const cx = Math.min(Math.max(8, rect.left + rect.width / 2 - w / 2), vw - w - 8)
-		const cy = Math.min(Math.max(8, rect.top + rect.height / 2 - h / 2), vh - h - 8)
-		const spots = [
-			{ left: cx, top: rect.bottom + 14 },
-			{ left: cx, top: rect.top - 14 - h },
-			{ left: rect.left - 14 - w, top: cy },
-			{ left: rect.right + 14, top: cy },
-		]
-		const fits = (p: { left: number; top: number }) => p.left >= 8 && p.top >= 8 && p.left + w <= vw - 8 && p.top + h <= vh - 8
-		const best = spots.find(fits) ?? { left: cx, top: rect.top + rect.height / 2 < vh / 2 ? vh - h - 8 : 8 }
-		style = { left: best.left, top: best.top, width: w }
-	}
 	return (
-		<>
-			{rect ? (
-				<div className="lesson-spot" style={{ left: rect.left - pad, top: rect.top - pad, width: rect.width + pad * 2, height: rect.height + pad * 2 }} />
-			) : (
-				<div className="lesson-dim" />
-			)}
-			<div className="lesson-card" ref={card} style={style}>
-				<small>
-					Lesson · {Math.min(at, LESSON.length - 1) + 1} / {LESSON.length}
-				</small>
-				<h3>{s.title}</h3>
-				<p>{s.body}</p>
-				{s.todo && !s.next && <p className="lesson-todo">👉 {s.todo}</p>}
-				<div className="btns">
-					{at > 0 && s.next && <button onClick={() => setK(Math.max(0, at - 1))}>Back</button>}
-					{s.next && (
-						<button className="primary" onClick={() => setK(at + 1)}>
-							{at + 1 < LESSON.length ? 'Next' : 'Let’s play'}
-						</button>
-					)}
-					<button className="ghost" onClick={() => setK(LESSON.length)}>
-						Skip lesson
-					</button>
-				</div>
-			</div>
-		</>
+		<Spotlight
+			step={{ title: s.title, body: s.body, todo: s.todo, next: s.next, target: s.target?.(g) ?? null }}
+			index={Math.min(at, LESSON.length - 1)}
+			total={LESSON.length}
+			label="Lesson"
+			onNext={() => setK(at + 1)}
+			onBack={() => setK(Math.max(0, at - 1))}
+			onSkip={() => setK(LESSON.length)}
+		/>
 	)
 }
 

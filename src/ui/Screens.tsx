@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { GuideWindow } from './guide'
+import { Spotlight, type SpotStep } from './spotlight'
 import { ASPECTS, card, coreLocations, MISSIONS_CORE, PATH_PACKS, TERRAINS, type Aspect } from '../data/data'
 import {
 	aspectCards,
@@ -92,13 +93,35 @@ export function Home({ campaigns, open, create, remove, tutorial }: { campaigns:
 
 // ------------------------------------------------------------------ new campaign
 
-export function NewCampaign({ done, cancel }: { done: (name: string, rangers: CampaignRanger[], expansions: string[]) => void; cancel: () => void }) {
+export function NewCampaign({ done, cancel, guideFirst = false }: { done: (name: string, rangers: CampaignRanger[], expansions: string[], guided: boolean) => void; cancel: () => void; guideFirst?: boolean }) {
 	const [name, setName] = useState('Lure of the Valley')
+	const [guided, setGuided] = useState(guideFirst)
+	const [gk, setGk] = useState(0)
 	const [exp, setExp] = useState<string[]>([])
 	const [rangers, setRangers] = useState<CampaignRanger[]>([])
 	const [building, setBuilding] = useState(false)
 	const [pre, setPre] = useState('UndauntedSeeker')
 	const [pname, setPname] = useState('')
+	// the setup guide for new players
+	const steps: (SpotStep & { done?: boolean })[] = [
+		{ title: 'Starting a campaign', body: 'A campaign is one long story told over 30 in-game days. Each time you play, you play one day. This guide walks you through setting it up. (You can stop it any time.)', target: null, next: true },
+		{ title: 'Give it a name', body: 'Any name you like, so you can find it later. “Lure of the Valley” is the name of the story in the core box.', target: '[data-guide="name"]', next: true },
+		{ title: 'Expansions', body: 'Only tick boxes for expansion boxes you actually own and want to use. Not sure? Leave them all empty — the core box has everything you need.', target: '[data-guide="expansions"]', next: true },
+		{ title: 'Your Rangers', body: 'Each player has their own Ranger (a character with their own deck of cards). You can play 1 to 4 Rangers; playing two yourself is a nice way to learn. Rangers you add show up here.', target: '[data-guide="rangers"]', next: true },
+		{
+			title: 'Pick a ready-made Ranger',
+			body: 'Easiest start: choose one of the four ready-made Rangers from the list (the starter decks suggested in the rulebook), type a name for them, and tap Add. You can build your own later, once you know the cards.',
+			target: '[data-guide="prebuilt"]',
+			todo: 'Choose a Ranger, type a name, tap Add',
+			done: rangers.length > 0,
+		},
+		{ title: 'More Rangers?', body: 'Add more Rangers the same way if you are playing with friends (or want to play two yourself). When you are ready, go on.', target: '[data-guide="prebuilt"]', next: true },
+		{ title: 'Start!', body: 'Tap “Start the campaign”. Next you’ll set up day 1 — the guide will help with that too.', target: '[data-guide="start"]', todo: 'Tap “Start the campaign”' },
+	]
+	const gs = steps[Math.min(gk, steps.length - 1)]
+	useEffect(() => {
+		if (guided && gs.done) setGk(gk + 1)
+	})
 	if (building)
 		return (
 			<Builder
@@ -111,12 +134,18 @@ export function NewCampaign({ done, cancel }: { done: (name: string, rangers: Ca
 		)
 	return (
 		<div className="screen">
-			<h2>New campaign</h2>
-			<label className="field">
+			{guided && gk < steps.length && <Spotlight step={gs} index={gk} total={steps.length} label="Setup guide" onNext={() => setGk(gk + 1)} onBack={() => setGk(Math.max(0, gk - 1))} onSkip={() => setGuided(false)} />}
+			<div className="row-between">
+				<h2>New campaign</h2>
+				<button className={`ghost tut-toggle light ${guided ? 'on' : ''}`} onClick={() => setGuided(!guided)}>
+					🎓 {guided ? 'Guide on' : 'Guide me'}
+				</button>
+			</div>
+			<label className="field" data-guide="name">
 				Campaign name
 				<input value={name} onChange={(e) => setName(e.target.value)} />
 			</label>
-			<div className="panel">
+			<div className="panel" data-guide="expansions">
 				<h4>Expansions in the Valley</h4>
 				{PATH_PACKS.map((p) => (
 					<label className="check" key={p.code}>
@@ -125,7 +154,7 @@ export function NewCampaign({ done, cancel }: { done: (name: string, rangers: Ca
 				))}
 				<p className="sub">Their locations, path cards, missions and weather join the Lure of the Valley campaign. You can change this later on the campaign page.</p>
 			</div>
-			<h3>Rangers ({rangers.length}/4)</h3>
+			<h3 data-guide="rangers">Rangers ({rangers.length}/4)</h3>
 			<ul className="rangers-list">
 				{rangers.map((r, k) => (
 					<li key={k}>
@@ -135,7 +164,7 @@ export function NewCampaign({ done, cancel }: { done: (name: string, rangers: Ca
 				))}
 			</ul>
 			{rangers.length < 4 && (
-				<div className="panel">
+				<div className="panel" data-guide="prebuilt">
 					<h4>Add a ready-made Ranger</h4>
 					<div className="row-input">
 						<select value={pre} onChange={(e) => setPre(e.target.value)}>
@@ -159,8 +188,8 @@ export function NewCampaign({ done, cancel }: { done: (name: string, rangers: Ca
 					<button onClick={() => setBuilding(true)}>…or build your own Ranger</button>
 				</div>
 			)}
-			<div className="btns">
-				<button className="primary" disabled={!rangers.length} onClick={() => done(name.trim() || 'Campaign', rangers, exp)}>
+			<div className="btns" data-guide="start">
+				<button className="primary" disabled={!rangers.length} onClick={() => done(name.trim() || 'Campaign', rangers, exp, guided)}>
 					Start the campaign
 				</button>
 				<button onClick={cancel}>Back</button>
@@ -324,13 +353,60 @@ export function CampaignView({ c, update, startDay, resume, back }: { c: Campaig
 	const set = (p: Partial<Campaign>) => update({ ...c, ...p })
 	const locs = coreLocations(['Core', ...(c.expansions ?? [])])
 	const inProgress = c.game && !c.game.ended
+	// setup guide for day 1
+	const [gk, setGk] = useState(0)
+	const [opened, setOpened] = useState(false)
+	const [missionsOpen, setMissionsOpen] = useState(false)
+	const firstDay = c.day === 1 && c.history.length === 0 && !inProgress
+	const guiding = !!c.guided && firstDay
+	const steps: (SpotStep & { done?: boolean })[] = [
+		{ title: 'Your campaign page', body: 'This page is your campaign tracker. Between play sessions you come back here to set up the next day. The guide will walk you through day 1.', target: null, next: true },
+		{ title: '30 days', body: 'The story lasts 30 days. Each time you play, you play one day, and it is marked off here. Some days have events (on the printed tracker in your box) — the guide will tell you when that matters.', target: '[data-guide="days"]', next: true },
+		{
+			title: 'Read entry 1 first',
+			body: 'The story starts in the campaign guide. Entry 1 introduces the Valley, tells you where you start and gives you your first mission. Tap “Open entry 1”, read it, then close the window.',
+			target: '[data-guide="entry1"]',
+			todo: 'Open entry 1, read it, close it',
+			done: opened && !guide,
+		},
+		{
+			title: 'Add your mission',
+			body: 'Entry 1 gives you a mission card. Missions are your goals; they sit next to the location while you play. Pick that mission from the “Add a mission…” list below and tap Add (in the core campaign it is Biscuit Delivery).',
+			target: '[data-guide="missions"]',
+			todo: 'Add the mission from entry 1 (or tap Next if it gave none)',
+			next: true,
+			done: c.missions.length > 0,
+		},
+		{ title: 'Where you are', body: 'Your Rangers start the campaign at Lone Tree Station, the Rangers’ home. After each day the game remembers where you ended up and fills this in.', target: '[data-guide="location"]', next: true },
+		{ title: 'The terrain', body: 'The kind of path you took to get here (woods, grassland…). It decides which wild cards you meet. For day 1 leave it as it is.', target: '[data-guide="terrain"]', next: true },
+		{ title: 'The weather', body: 'The printed campaign tracker in your box lists the weather for each day. Day 1 is A Perfect Day, already chosen.', target: '[data-guide="weather"]', next: true },
+		{ title: 'The lead Ranger', body: 'The lead Ranger takes the first turn each round and follows any card text that says “Lead Ranger”. With one Ranger, that is you.', target: '[data-guide="lead"]', next: true },
+		{ title: 'Ready!', body: 'Tap “Start day 1”. The game shuffles and deals everything. On day 1 a coach will suggest good moves while you play (turn it off with the 🎓 button).', target: '[data-guide="start"]', todo: 'Tap “Start day 1”' },
+	]
+	const gs = steps[Math.min(gk, steps.length - 1)]
+	useEffect(() => {
+		if (guiding && gs.done && gk < steps.length) setGk(gk + 1)
+	})
+	useEffect(() => {
+		if (guide) setOpened(true)
+	}, [guide])
+	useEffect(() => {
+		if (guiding && gk === 3) setMissionsOpen(true)
+	}, [guiding, gk])
 	return (
 		<div className="screen campaign">
+			{guide && <GuideWindow entry={guide} onClose={() => setGuide(null)} />}
+			{guiding && gk < steps.length && !guide && <Spotlight step={gs} index={gk} total={steps.length} label="Setup guide" onNext={() => setGk(gk + 1)} onBack={() => setGk(Math.max(0, gk - 1))} onSkip={() => set({ guided: false })} />}
 			<div className="row-between">
 				<button onClick={back}>← Campaigns</button>
 				<h2>{c.name}</h2>
+				{firstDay && (
+					<button className={`ghost tut-toggle light ${c.guided ? 'on' : ''}`} onClick={() => set({ guided: !c.guided })}>
+						🎓 {c.guided ? 'Guide on' : 'Guide me'}
+					</button>
+				)}
 			</div>
-			<div className="tracker">
+			<div className="tracker" data-guide="days">
 				<div className="days">
 					{Array.from({ length: 30 }, (_, k) => (
 						<span key={k} className={`day ${k + 1 < c.day ? 'past' : k + 1 === c.day ? 'now' : ''}`}>
@@ -352,7 +428,7 @@ export function CampaignView({ c, update, startDay, resume, back }: { c: Campaig
 				<div className="panel">
 					<h3>Set up day {c.day}</h3>
 					{c.entries.length > 0 && c.day === 1 && c.history.length === 0 && (
-						<p className="guide-note">
+						<p className="guide-note" data-guide="entry1">
 							📖 New campaign: read <b>entry 1</b> of the campaign guide first. It tells you where you start and your first mission. Add missions below.{' '}
 							<button className="link" onClick={() => setGuide('1')}>
 								Open entry 1
@@ -360,7 +436,7 @@ export function CampaignView({ c, update, startDay, resume, back }: { c: Campaig
 						</p>
 					)}
 					<p className="sub">Read any campaign guide entries listed above day {c.day} on your campaign tracker.</p>
-					<label className="field">
+					<label className="field" data-guide="location">
 						Current location
 						<select value={c.location} onChange={(e) => set({ location: e.target.value })}>
 							{locs.map((l) => (
@@ -371,7 +447,7 @@ export function CampaignView({ c, update, startDay, resume, back }: { c: Campaig
 							))}
 						</select>
 					</label>
-					<label className="field">
+					<label className="field" data-guide="terrain">
 						Terrain you were travelling on
 						<select value={c.terrain} onChange={(e) => set({ terrain: e.target.value })}>
 							{Object.entries(TERRAINS).map(([k, v]) => (
@@ -381,7 +457,7 @@ export function CampaignView({ c, update, startDay, resume, back }: { c: Campaig
 							))}
 						</select>
 					</label>
-					<label className="field">
+					<label className="field" data-guide="weather">
 						Weather (as listed under day {c.day} on your tracker)
 						<select value={c.weather} onChange={(e) => set({ weather: e.target.value })}>
 							{weatherOptions(c).map((w) => (
@@ -404,7 +480,7 @@ export function CampaignView({ c, update, startDay, resume, back }: { c: Campaig
 							</label>
 						))}
 					</div>
-					<label className="field">
+					<label className="field" data-guide="lead">
 						Lead Ranger
 						<select value={c.lead} onChange={(e) => set({ lead: Number(e.target.value) })}>
 							{c.rangers.map((r, k) => (
@@ -415,13 +491,13 @@ export function CampaignView({ c, update, startDay, resume, back }: { c: Campaig
 						</select>
 					</label>
 					{c.camped && c.rewards.length > 0 && <p className="sub">You camped last night: you can swap reward cards into your decks below.</p>}
-					<button className="primary big" onClick={() => startDay(c)}>
+					<button className="primary big" data-guide="start" onClick={() => startDay(c)}>
 						Start day {c.day}
 					</button>
 				</div>
 			)}
 
-			<details className="panel fold">
+			<details className="panel fold" data-guide="missions" open={missionsOpen} onToggle={(e) => setMissionsOpen((e.target as HTMLDetailsElement).open)}>
 				<summary>
 					<h3>Missions</h3>
 				</summary>
@@ -605,7 +681,7 @@ export function CampaignView({ c, update, startDay, resume, back }: { c: Campaig
 					<input placeholder="Open a guide entry (e.g. 3 or 1.02)" id="open-entry" onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).value.trim() && setGuide((e.target as HTMLInputElement).value.trim())} />
 					<button onClick={() => { const v = (document.getElementById('open-entry') as HTMLInputElement | null)?.value.trim(); if (v) setGuide(v) }}>📖 Open</button>
 				</div>
-				{guide && <GuideWindow entry={guide} onClose={() => setGuide(null)} />}
+
 				<ol className="history">
 					{c.history.map((h) => (
 						<li key={h.day}>
