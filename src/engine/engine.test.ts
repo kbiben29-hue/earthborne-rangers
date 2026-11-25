@@ -15,7 +15,7 @@ const setup = (n = 2, seed = 7): DaySetup => ({
 	weather: '01373',
 	missions: [],
 })
-function through(g: Game): Game {
+export function through(g: Game): Game {
 	// keep both hands, read guide entries, finish arrival
 	for (let k = 0; k < 20 && g.queue.length && !g.ended; k++) {
 		const h = g.queue[0]
@@ -26,6 +26,7 @@ function through(g: Game): Game {
 		else if (h.kind === 'manual') g = apply(g, { t: 'manualDone' })
 		else if (h.kind === 'aspect') g = apply(g, { t: 'aspect', a: h.options[0] })
 		else if (h.kind === 'scout') g = apply(g, { t: 'scouted', top: h.cards, bottom: [] })
+		else if (h.kind === 'pickHand') g = apply(g, { t: 'pickHand', index: h.optional ? null : h.options[0] })
 		else break
 	}
 	return g

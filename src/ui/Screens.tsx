@@ -8,7 +8,9 @@ import {
 	emptyBuild,
 	EXPANSION_BACKGROUNDS,
 	EXPANSION_SPECIALTIES,
+	aspirationsOf,
 	isExpert,
+	personalReward,
 	meetsAspect,
 	PREBUILT_NAMES,
 	prebuiltRanger,
@@ -467,6 +469,40 @@ export function CampaignView({ c, update, startDay, resume, back }: { c: Campaig
 				</div>
 			</details>
 
+			{aspirationsOf(c).length > 0 && (
+				<details className="panel fold" open>
+					<summary>
+						<h3>Aspirations</h3>
+					</summary>
+					{aspirationsOf(c).map((a) => {
+						const R = c.rangers[a.ranger]
+						const reward = personalReward(a.card)
+						const bump = (d: number) => {
+							const list = aspirationsOf(c).map((x) => (x === a ? { ...x, marks: Math.max(0, x.marks + d) } : x))
+							const me = list.find((x) => x.card === a.card && x.ranger === a.ranger)!
+							let rangers = c.rangers
+							if (!me.done && me.marks >= me.goal && reward) {
+								me.done = true
+								rangers = c.rangers.map((x, k) => (k === a.ranger ? { ...x, personal: [...new Set([...(x.personal ?? []), reward])] } : x))
+							}
+							update({ ...c, aspirations: list, rangers })
+						}
+						return (
+							<div key={a.ranger + a.card} className="asp-row">
+								<b>{R.name}:</b> {card(a.card).name} — {a.marks}/{a.goal} {a.what}
+								{a.goal === 1 ? '' : 's'} {a.done ? '✓ complete' : ''}
+								{reward && <small className="dim"> (reward: {card(reward).name})</small>}
+								<span className="mini-btns">
+									<button onClick={() => bump(-1)}>−</button>
+									<button onClick={() => bump(1)}>+</button>
+								</span>
+							</div>
+						)
+					})}
+					<p className="sub">The game counts records made during play and tokens left on objective gear at the end of each day. Use − / + for anything recorded by hand.</p>
+				</details>
+			)}
+
 			<details className="panel fold">
 				<summary>
 					<h3>Rangers</h3>
@@ -560,7 +596,7 @@ function DeckEditor({ c, r, update }: { c: Campaign; r: number; update: (c: Camp
 		update({ ...c, rangers })
 		setOut(null)
 	}
-	const options = [...new Set([...(c.camped ? c.rewards : []), ...R.setAside])].filter((id) => meetsAspect(card(id), asp) && (counts.get(id) ?? 0) < 2)
+	const options = [...new Set([...(c.camped ? [...c.rewards, ...(R.personal ?? [])] : []), ...R.setAside])].filter((id) => meetsAspect(card(id), asp) && (counts.get(id) ?? 0) < 2)
 	return (
 		<div className="deck-editor">
 			<p className="sub">

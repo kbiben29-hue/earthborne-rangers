@@ -3,6 +3,8 @@ import { useMotion } from './motion'
 import { coachFor, eventNote, INTRO, type CoachStep } from './coach'
 import { ASPECTS, card, CARDS, CHALLENGE, MISSIONS_CORE, SETS, TERRAINS, type Aspect } from '../data/data'
 import {
+	baseTests,
+	timingOf,
 	attachments,
 	availableTests,
 	between,
@@ -23,7 +25,7 @@ import {
 	typeOf,
 	zoneCards,
 } from '../engine/engine'
-import { COMMON_TESTS } from '../engine/text'
+
 import type { Game, Intent, ManualOp, Prompt } from '../engine/types'
 import { CardTile, cardImg, HandCard, imgUrl, RulesText } from './Card'
 
@@ -126,10 +128,10 @@ export function Board({
 		if (!idle || !g.inst[uid]) return out
 		for (const t of availableTests(g, me).filter((t) => t.src === uid))
 			out.push({ label: t.name, aspect: t.aspect, run: () => dispatch({ t: 'test', ranger: me, src: uid, test: t.test, useRole }) })
-		for (const t of COMMON_TESTS.filter((t) => t.targets && commonTargetOk(g, t.key, uid)))
+		for (const t of baseTests(g, me).filter((t) => t.targets && commonTargetOk(g, t.key, uid)))
 			out.push({ label: t.name, aspect: t.aspect, run: () => dispatch({ t: 'test', ranger: me, src: null, test: t.key, target: uid, useRole }) })
 		P(g, uid).abilities.forEach((a, i) => {
-			if (a.kind !== 'exhaust' || /^Exhaust[^:]*: When (?:a Ranger|you) performs?/i.test(a.text)) return
+			if (a.kind !== 'exhaust' || (a.timing && !/^Before your first turn/i.test(a.timing)) || /^Exhaust[^:]*: When (?:a Ranger|you) performs?/i.test(a.text)) return
 			const inst = g.inst[uid]
 			if (inst.exhausted || (inst.zone === 'player' && inst.owner !== me && inst.kind !== 'path')) return
 			out.push({ label: a.text.replace(/^Exhaust(?: \(use [^)]*\))?:\s*/i, '').slice(0, 42), run: () => dispatch({ t: 'ability', ranger: me, uid, line: i }) })
@@ -237,7 +239,7 @@ export function Board({
 	}
 
 	const startCommon = (key: string) => {
-		const t = COMMON_TESTS.find((x) => x.key === key)!
+		const t = baseTests(g, me).find((x) => x.key === key)!
 		setBubble(null)
 		if (!t.targets) {
 			dispatch({ t: 'test', ranger: me, src: null, test: key, useRole })
@@ -342,7 +344,8 @@ export function Board({
 					)}
 					{idle && (
 						<span className="acts">
-							{COMMON_TESTS.map((t) => (
+							{R.spiritspeak && <span className="spirit-tag" title="Spiritspeaking: Spirit Speaker tests replace the common tests until your role readies">✧ Spiritspeaking</span>}
+							{baseTests(g, me).map((t) => (
 								<button key={t.key} className={`act act-${t.aspect} ${coachBtn(t.key)}`} disabled={!myTurnOk || R.energy[t.aspect] < 1} onClick={() => startCommon(t.key)} title={t.text}>
 									<b>{t.aspect}</b>
 									{t.name}
@@ -552,6 +555,8 @@ function PromptPanel({ g, head, dispatch, setPick, onDayOver, hooks, coachEnergy
 			return <Choose g={g} head={head} dispatch={dispatch} />
 		case 'ask':
 			return <Ask head={head} dispatch={dispatch} />
+		case 'pickHand':
+			return <PickHand key={head.key + g.log.length} g={g} head={head} dispatch={dispatch} />
 		case 'manual':
 			return <Manual head={head} dispatch={dispatch} />
 		case 'aspect':
@@ -646,12 +651,14 @@ function Commit({ g, head, dispatch, coachEnergy }: { g: Game; head: Extract<Pro
 	const [buffers, setBuffers] = useState(0)
 	const [boosts, setBoosts] = useState<number[]>([])
 	const [resp, setResp] = useState<number[]>([])
+	const [xs, setXs] = useState<string[]>([])
+	const xsOn = opt.extras.filter((x) => xs.includes(x.key))
 	const pool = { ...R.energy, [aspect]: R.energy[aspect] - energy }
 	const iconsOf = (i: number) => iconsFor(g, head.ranger, R.hand[i], head.approach, pool) + (vers.includes(i) ? 1 : 0)
 	const icons = disc.reduce((s, i) => s + iconsOf(i), 0)
 	const tok = tokenEffort(g, head.ranger, head.target)
-	const total = Math.min(energy, max) + icons + tok + extra + boosts.length
-	const dodges = (dodgeRole ? 1 : 0) + resp.reduce((n, h) => n + (opt.responses.find((x) => x.hand === h && x.kind === 'dodge')?.n ?? 0), 0)
+	const total = Math.max(0, Math.min(energy, max) + icons + tok + extra + boosts.length + xsOn.reduce((n, x) => n + x.effort, 0) + opt.mods.reduce((n, m) => n + m.effort, 0))
+	const dodges = (dodgeRole ? 1 : 0) + xsOn.reduce((n, x) => n + x.dodge, 0) + resp.reduce((n, h) => n + (opt.responses.find((x) => x.hand === h && x.kind === 'dodge')?.n ?? 0), 0)
 	const hurting = opt.inWay.filter((u) => !has(g, u, 'Friendly')).sort((a, b) => presence(g, b) - presence(g, a))
 	const fat = hurting.slice(dodges).reduce((n, u) => n + Math.max(0, presence(g, u) - buffers), 0)
 	const toggle = (list: number[], set: (x: number[]) => void, v: number) => set(list.includes(v) ? list.filter((x) => x !== v) : [...list, v])
@@ -733,6 +740,21 @@ function Commit({ g, head, dispatch, coachEnergy }: { g: Game; head: Extract<Pro
 					))}
 				</div>
 			)}
+			{(opt.extras.length > 0 || opt.mods.length > 0) && (
+				<div className="checks">
+					{opt.mods.map((m, k) => (
+						<p className="sub" key={k}>
+							{m.label}: {m.effort > 0 ? '+' : ''}
+							{m.effort} effort
+						</p>
+					))}
+					{opt.extras.map((x) => (
+						<label className="check" key={x.key}>
+							<input type="checkbox" checked={xs.includes(x.key)} onChange={() => setXs(xs.includes(x.key) ? xs.filter((k) => k !== x.key) : [...xs, x.key])} /> {x.label}
+						</label>
+					))}
+				</div>
+			)}
 			{opt.responses.length > 0 && (
 				<div className="checks">
 					{opt.responses.map((rs) => (
@@ -769,12 +791,35 @@ function Commit({ g, head, dispatch, coachEnergy }: { g: Game; head: Extract<Pro
 					className="primary commit-btn"
 					disabled={max < 1}
 					onClick={() =>
-						dispatch({ t: 'commit', energy: Math.min(energy, max), discards: disc, extra, diff, dodgeRole, buffers, boosts, swap, responses: resp, versatile: vers })
+						dispatch({ t: 'commit', energy: Math.min(energy, max), discards: disc, extra, diff, dodgeRole, buffers, boosts, swap, responses: resp, versatile: vers, extras: xs })
 					}
 				>
 					Draw a challenge card
 				</button>
 				<button onClick={() => dispatch({ t: 'cancelTest' })}>Cancel</button>
+			</div>
+		</div>
+	)
+}
+
+function PickHand({ g, head, dispatch }: { g: Game; head: Extract<Prompt, { kind: 'pickHand' }>; dispatch: Dispatch }) {
+	const R = g.rangers[head.ranger]
+	const pile = head.from === 'hand' ? R.hand : R.discard
+	const [sel, setSel] = useState<number | null>(head.options.length === 1 ? head.options[0] : null)
+	return (
+		<div className="panel prompt">
+			<h3>{head.title}</h3>
+			<p>{head.text}</p>
+			<div className="hand mini">
+				{head.options.map((k) => (
+					<HandCard key={k} id={pile[k]} selected={sel === k} onClick={() => setSel(k)} />
+				))}
+			</div>
+			<div className="btns">
+				<button className="primary" disabled={sel == null} onClick={() => dispatch({ t: 'pickHand', index: sel })}>
+					{sel != null ? `Choose ${card(pile[sel]).name}` : 'Choose a card'}
+				</button>
+				{head.optional && <button onClick={() => dispatch({ t: 'pickHand', index: null })}>Skip</button>}
 			</div>
 		</div>
 	)
@@ -1048,14 +1093,14 @@ function Viewer({
 	const text = side ? side.text : c.text
 	const p = P(g, inst.uid)
 	const tests = availableTests(g, me).filter((t) => t.src === inst.uid)
-	const commons = COMMON_TESTS.filter((t) => t.targets && commonTargetOk(g, t.key, inst.uid))
+	const commons = baseTests(g, me).filter((t) => t.targets && commonTargetOk(g, t.key, inst.uid))
 	const R = g.rangers[me]
 	const op = (o: ManualOp) => dispatch({ t: 'manual', op: o })
 	const keep = (o: ManualOp) => {
 		dispatch({ t: 'manual', op: o })
 	}
 	const fat = between(g, me, inst.uid).filter((u) => !has(g, u, 'Friendly')).reduce((s, u) => s + presence(g, u), 0)
-	const abilities = p.abilities.map((a, i) => ({ l: a.text, i, kind: a.kind })).filter((a) => a.kind === 'exhaust' && !/^Exhaust[^:]*: When (?:a Ranger|you) performs?/i.test(a.l))
+	const abilities = p.abilities.map((a, i) => ({ l: a.text, i, kind: a.kind })).filter((a) => a.kind === 'exhaust' && !(p.abilities[a.i].timing && !/^Before your first turn/i.test(p.abilities[a.i].timing!)) && !/^Exhaust[^:]*: When (?:a Ranger|you) performs?/i.test(a.l))
 	return (
 		<div className="panel viewer">
 			<button className="close" onClick={close}>×</button>

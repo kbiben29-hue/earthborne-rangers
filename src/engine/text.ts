@@ -17,8 +17,10 @@ export interface TestDef {
 	raw: string
 }
 export interface Ability {
-	kind: 'exhaust' | 'response' | 'other'
+	kind: 'exhaust' | 'response' | 'use' | 'other'
 	use?: number
+	/** "After/When/Before …" timing: the game offers it when that happens (triggers.ts). */
+	timing?: string
 	text: string
 	effect: Effect
 }
@@ -81,7 +83,7 @@ function findTests(flat: string): { tests: TestDef[]; before: string } {
 	return { tests, before: flat.slice(0, hits[0].index!).trim() }
 }
 
-const KW = /^(Ambush|Obstacle|Friendly|Persistent|Unique|Fatiguing|Disconnected|Setup|Conduit|Manifestation|Deployed|Dormant)( \d+)?$/
+const KW = /^(Ambush|Obstacle|Friendly|Persistent|Unique|Fatiguing|Disconnected|Setup|Conduit|Manifestation|Deployed|Dormant|Spirit)( \d+)?$/
 
 export function parse(text: string | undefined): Parsed {
 	const out: Parsed = { keywords: [], tests: [], challenge: {}, clear: [], arrival: [], abilities: [], other: [] }
@@ -160,11 +162,16 @@ export function parse(text: string | undefined): Parsed {
 			out.enters = effect(en[1])
 			return
 		}
-		const ab = flat.match(/^(Exhaust|Response)(?: \(use (\d+|X) [^)]*\))?:\s*(.*)$/i)
+		const ab = flat.match(/^(Exhaust|Response|Use (\d+) \w+)(?: \(use (\d+|X) [^)]*\))?:\s*(.*)$/i)
 		if (ab) {
-			out.abilities.push({ kind: ab[1].toLowerCase() as 'exhaust', use: ab[2] ? Number(ab[2]) || 1 : undefined, text: flat, effect: effect(ab[3].replace(/^When [^,]+,\s*/i, '')) })
+			const kind = /^use/i.test(ab[1]) ? 'use' : (ab[1].toLowerCase() as 'exhaust')
+			const use = ab[2] ? Number(ab[2]) : ab[3] ? Number(ab[3]) || 1 : undefined
+			const tm = ab[4].match(/^((?:After|When|Before) [^,]+),\s*(.*)$/i)
+			out.abilities.push({ kind, use, text: flat, timing: tm?.[1], effect: effect(tm ? tm[2] : ab[4]) })
 			return
 		}
+		const tm = flat.match(/^((?:After|When|Before) [^,]+),\s*(.*)$/)
+		if (tm && !/^When (you play this|you draw this|this card)/i.test(flat)) out.abilities.push({ kind: 'other', text: flat, timing: tm[1], effect: effect(tm[2]) })
 		out.other.push(flat)
 	})
 	return out
@@ -176,4 +183,12 @@ export const COMMON_TESTS: { key: string; aspect: Aspect; approach: Approach; na
 	{ key: 'connect', aspect: 'SPI', approach: 'connection', name: 'Connect', diff: 'X', targets: 'being', text: 'Add progress to a being equal to your effort.' },
 	{ key: 'remember', aspect: 'FOC', approach: 'reason', name: 'Remember', diff: 1, targets: '', text: 'Scout Ranger cards equal to your effort, then draw 1 Ranger card.' },
 	{ key: 'avoid', aspect: 'AWA', approach: 'conflict', name: 'Avoid', diff: 'X', targets: 'being', text: 'Exhaust one being.' },
+]
+
+/** Stewards of the Valley: the Spirit Speaker Tests card, used instead of the common tests while spiritspeaking. */
+export const SPIRIT_TESTS: typeof COMMON_TESTS = [
+	{ key: 'influence', aspect: 'FIT', approach: 'reason', name: 'Influence', diff: 'X', targets: 'feature or being', text: 'Move a feature or being. When you perform this test, dodge all cards that share an area with a spirit.' },
+	{ key: 'awaken', aspect: 'SPI', approach: 'conflict', name: 'Awaken', diff: 1, targets: '', text: 'Choose a Ranger. That Ranger soothes fatigue equal to the number of spirits within reach of them plus 1.' },
+	{ key: 'commune', aspect: 'FOC', approach: 'connection', name: 'Commune', diff: 'X', targets: 'spirit', text: 'Add 2 progress to a spirit for every effort.' },
+	{ key: 'measure', aspect: 'AWA', approach: 'exploration', name: 'Measure', diff: 1, targets: '', text: 'Scout path cards equal to the number of spirits along the way plus 1.' },
 ]

@@ -32,6 +32,15 @@ npm run data    # scripts/build-game-data.mjs → src/data/game.json
   not understood becomes a `manual` step.
 - `src/engine/scripts.ts` — `REWRITE`: plain-sentence rewrites of card parts the reader can't handle
   (same meaning), keyed `id+side:part`; `BY_CHALLENGE` arrivals. Coverage check: count `manual` steps.
+- `src/engine/triggers.ts` — Ranger-card abilities that happen at a moment: `readTiming("After you succeed at a
+  Traverse test")` → `On`; the engine `fire()`s events (success, fatigue, clear, exhaustRole, travel, arrive,
+  rest, play, enters, conduit) and offers matching gear / attachment / role / Response-moment abilities;
+  "When you would suffer …" prevention via `offerPrevention`. Test-time extras (spirits, Deployed gear,
+  "When a Ranger performs a test" moments) are in `testExtras()` and show as checkboxes on the commit panel.
+- Stewards of the Valley: Spirit keyword (common tests can't target spirits; only Spiritual attachments),
+  spiritspeaking (`Ranger.spiritspeak`, `SPIRIT_TESTS` replace `COMMON_TESTS` until the role readies,
+  `baseTests()`), aspirations (`record` step → `g.records`; `finishDay` adds marks + tokens on objective gear,
+  unlocks the Personal Reward into `CampaignRanger.personal`).
 - `src/engine/engine.ts` — the rules (one day): `newDay()`, pure `apply(state, intent)` / `tryApply()`.
   Prompts live in `g.queue` (mulligan, test, choose, ask, aspect, manual, guide, scout, equip, travel,
   dayOver); effects run as jobs in `g.jobs` (`runJobs`), stopping only for a prompt. `testOptions()` lists
@@ -58,6 +67,13 @@ npm run data    # scripts/build-game-data.mjs → src/data/game.json
    Whistle, Calming Presence's cancel, Root Snare, Harmonize, Sky Whip (moment tests), Local Fare,
    Nature's Abundance, Afforded by Nature, Moment of Desperation; path cards: Whispering Fields, Mount
    Nim, Elders' deck swaps, Dace, Evergreen Hall / Hearty Brew, Spire deck, Biscuit Basket.
+   Stewards of the Valley by hand: The Best Teacher, Alloy Recycler, Essays' "it does not move", Zoological
+   Recorder / Compendium, A Deeper Connection's harm prevention, A Circuitous Route, Show No Fear, All is
+   Clay, Spirit of the Verdessa, Atrox / Irix / Lutrinal Spirits, Carbonforged Drum, The Better Part of
+   Valor, Go Forth Fearless Ranger, The Tale of Two Rivers, Needle Moss, Transverse Ocarina (ready),
+   Conductor, Influential, Gratitude of the Valley, Superior Trail, Brightfruit Tree's response.
 2. Campaign tracker weather schedule per day (from the printed tracker) and day-30 handling.
 3. Online play with a friend (PeerJS, like Afterlife).
-4. Legacy of the Ancestors / Spire in Bloom / Shadow of the Storm content (data is already there).
+4. Expansion order agreed with Kris: SoV (done, see above) → Spire in Bloom + Shadow of the Storm (DragnCards
+   has pictures but no text: read it off `images/` into a text-override file) → Moments on the Path /
+   Valley → Legacy of the Ancestors (66 cards without text). Into the Maw: only its 5 Ranger cards exist.

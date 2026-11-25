@@ -104,6 +104,82 @@ export const REWRITE: Record<string, string> = {
 	'01410A:mountain': '',
 	'01410B:arrival0': 'Draw 1 path card.',
 	'01410B:arrival1': 'Draw 1 path card.',
+
+	// ---------------- Stewards of the Valley (Ranger cards)
+	// Grell's Secret Map
+	'03002A:ab0': 'Add 1 hunch to this card. Add 1[progress] to the location.',
+	// Personal Travelogue ("an equal number": the fatigue suffered)
+	'03020A:ab0': 'Add stories equal to your effort to this card.',
+	'03020A:test0': 'If there are 4 or more stories on this card, shuffle up to 2 cards from your fatigue stack into your deck. Discard all stories from this card.',
+	// Nut rolled Honey Loaf
+	'03021A:ab0': "If it is a Ranger's turn, add 2[progress] to that being. If it is not a Ranger's turn, add 1[progress] to that being.",
+	// Power Cell Recycler
+	'03025A:ab0': 'Remove 2 tokens from one of your equipped tech to add 1 token to a tech.',
+	// Remote Sentinels
+	'03026A:ab0': 'Move a being, treating it as if it does not have ambush. If it is within reach, add 1[progress] to it.',
+	// Anchorite of Stone
+	'03032A:ab0': 'Add 1 token to a conduit or ready a conduit.',
+	// Visions of the Floating Tower ("an equal number": tokens discarded)
+	'03036A:ab0': 'Soothe fatigue equal to your effort.',
+	// Spirit of the Silverfin
+	'03055A:ab0': 'Discard 3[progress] from this spirit to prevent that fatigue or injury.',
+	// Heart Harmonizer
+	'03053A:ab1': 'Spend 2[progress] from a spirit within reach to prevent it.',
+	// Wonders of the Valley ("equal to the number of fatigue suffered plus 1")
+	'03059A:ab0': 'Add [progress] to the attached card equal to your effort. Add 1[progress] to the attached card.',
+	// The Buck and the Wolhund
+	'03060A:play': 'Add 1[harm] to a prey. Exhaust a predator. Add 3[harm] to it.',
+	// Book of Great Deeds: Recount
+	'03063A:test0': 'Shuffle the top card of your fatigue stack into your deck. Add 2[progress] to each human within reach.',
+}
+
+/** Effects built from steps, where even a rewrite can't say it. */
+const BUILT: Record<string, () => Effect> = {
+	// The Full Understory: "Scout X path cards. X is equal to twice the number of flora in play. If there are no flora in play, search the path deck for the next flora and put it into play."
+	'03013A:play': () => ({
+		text: 'Scout twice the number of flora in play; if there are none, find the next flora in the path deck.',
+		pre: [],
+		steps: [
+			{ k: 'searchPath', f: { words: ['flora'] }, then: 'play', when: { c: 'exists', f: { words: ['flora'] }, negate: true, bind: false } },
+			{ k: 'scoutPath', amt: { count: { words: ['flora'] }, mult: 2 } },
+		],
+		auto: true,
+	}),
+	// Piercing Whistle
+	'03009A:play': () => ({
+		text: 'Search your deck for a being and add it to your hand. You may discard another being from your hand to play it for free.',
+		pre: [],
+		steps: [
+			{ k: 'searchDeck', f: { words: ['being'] } },
+			{ k: 'either', a: [{ k: 'handToFatigue', to: 'discard' }, { k: 'playFound', discount: 99, skipLast: 1 }], b: [], la: 'Discard another being from your hand to play it for free', lb: 'Keep it in hand' },
+		],
+		auto: true,
+	}),
+	// Gregarious Inventor (the Ranger who exhausts it searches)
+	'03022A:ab0': () => ({ text: 'Search your deck for a gear and play it (paying its cost).', pre: [], steps: [{ k: 'searchDeck', f: { words: ['gear'] } }, { k: 'playFound', discount: 0 }], auto: true }),
+	// Call Upon the Spirits
+	'03041A:play': () => ({
+		text: 'Search your deck for a spirit and add it to your hand. If spiritspeaking, you may play it for 1 less; otherwise you may exhaust your role to spiritspeak.',
+		pre: [],
+		steps: [
+			{ k: 'searchDeck', f: { words: ['spirit'] } },
+			{ k: 'either', a: [{ k: 'playFound', discount: 1 }], b: [], la: 'Play that spirit now (1 less)', lb: 'Keep it in hand', when: { c: 'spiritspeaking' } },
+			{ k: 'either', a: [{ k: 'spiritspeak' }], b: [], la: 'Exhaust your role to spiritspeak', lb: 'Not now', when: { c: 'spiritspeaking', negate: true } },
+		],
+		auto: true,
+	}),
+	// The Tireless Artisan: "they soothe 2 fatigue. If that Ranger has 5 or more fatigue, they soothe 4 fatigue instead."
+	'03065A:ab0': () => ({
+		text: 'They soothe 2 fatigue (4 if they have 5 or more fatigue).',
+		pre: [],
+		steps: [
+			{ k: 'soothe', amt: { n: 2 }, when: { c: 'not', x: { c: 'youFatigue', min: 5 } } },
+			{ k: 'soothe', amt: { n: 4 }, when: { c: 'youFatigue', min: 5 } },
+		],
+		auto: true,
+	}),
+	// Dolewood Lute
+	'03068A:ab0': () => ({ text: 'Choose a Ranger. That Ranger soothes 1 fatigue (2 if a tale is attached to their role).', pre: [], steps: [{ k: 'soothe', amt: { n: 1, tale: 1 }, who: 'choose' }], auto: true }),
 }
 
 /** "Draw 1 challenge card and do the following based on its icon" arrivals. */
@@ -138,6 +214,15 @@ export function scriptFor(id: string, side: 'A' | 'B', p: Parsed) {
 		const s = get(`arrival${k}`)
 		if (s !== undefined) a.effect = effect(s)
 	})
+	p.abilities.forEach((a, k) => {
+		const t = get(`ab${k}`)
+		if (t !== undefined) a.effect = effect(t)
+		const b = BUILT[`${key}:ab${k}`]
+		if (b) a.effect = b()
+	})
+	const pl = get('play')
+	if (pl !== undefined) p.choice = effect(pl)
+	if (BUILT[`${key}:play`]) p.choice = BUILT[`${key}:play`]()
 	const bc = BY_CHALLENGE[key]
 	if (bc) {
 		const steps = (t: string): StepWhen[] => t.split(/,\s*then\s+|\.\s*/).filter(Boolean).flatMap((x) => sentence(x) ?? [])

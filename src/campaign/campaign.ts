@@ -10,6 +10,19 @@ export interface CampaignRanger {
 	deck: string[]
 	/** Starting cards swapped out for rewards (can be swapped back at camp). */
 	setAside: string[]
+	/** Personal rewards this Ranger has unlocked through aspirations (only they may use them). */
+	personal?: string[]
+}
+/** Stewards of the Valley: a personal goal on an Expert card ("Objective (6 seeds: [aspiration])"). */
+export interface Aspiration {
+	ranger: number
+	/** The aspiration card in the deck. */
+	card: string
+	goal: number
+	/** What is counted ("seed", "hunch"…). */
+	what: string
+	marks: number
+	done: boolean
 }
 export interface CampaignMission {
 	id: string
@@ -42,6 +55,7 @@ export interface Campaign {
 	lead: number
 	/** The learn-to-play day (coach on, not a real campaign). */
 	tutorial?: boolean
+	aspirations?: Aspiration[]
 }
 
 export const LINGERING_INJURY = '01240'
@@ -116,8 +130,52 @@ export function finishDay(c: Campaign, g: Game): Campaign {
 		const m = n.missions.find((x) => x.id === i?.id)
 		if (m && i) m.side = i.side
 	}
+	// Aspirations: records made during the day, and tokens left on objective gear at the end of it
+	n.aspirations = aspirationsOf(n)
+	for (const a of n.aspirations) {
+		if (a.done) continue
+		const rec = (g.records ?? []).filter((x) => x.ranger === a.ranger && singular(x.what) === singular(a.what)).reduce((s, x) => s + x.n, 0)
+		const tok = Object.values(g.inst)
+			.filter((i) => i.id === a.card && i.deckOf === a.ranger && card(i.id).type === 'Gear')
+			.reduce((s, i) => s + i.tokens, 0)
+		a.marks += rec + tok
+		if (a.marks >= a.goal) {
+			a.done = true
+			const reward = personalReward(a.card)
+			if (reward) {
+				const R = n.rangers[a.ranger]
+				R.personal = [...new Set([...(R.personal ?? []), reward])]
+				n.history.push({ day: n.day - 1, summary: `${R.name} completed the aspiration ${card(a.card).name} and unlocked ${card(reward).name}.` })
+			}
+		}
+	}
 	n.game = null
 	return n
+}
+
+const singular = (w: string) => w.toLowerCase().replace(/(ches|shes)$/, (m) => m.slice(0, -2)).replace(/ies$/, 'y').replace(/s$/, '')
+/** "Objective (6 hunches: [aspiration])" on a card. */
+export function objectiveOf(id: string): { goal: number; what: string } | null {
+	const m = (card(id).text ?? '').replace(/<[^>]+>/g, '').match(/Objective \((\d+) ([\w ]+?):/i)
+	return m ? { goal: Number(m[1]), what: singular(m[2]) } : null
+}
+/** The Personal Reward card unlocked by an aspiration card. */
+export function personalReward(aspirationCard: string): string | null {
+	const nm = card(aspirationCard).name
+	return Object.values(CARDS).find((c) => new RegExp(`Personal Reward \\(${nm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\)`, 'i').test((c.text ?? '').replace(/<[^>]+>/g, '')))?.id ?? null
+}
+/** Aspirations of every Ranger (one per aspiration card in their deck), keeping progress made so far. */
+export function aspirationsOf(c: Campaign): Aspiration[] {
+	const out: Aspiration[] = []
+	c.rangers.forEach((R, k) => {
+		for (const id of new Set(R.deck)) {
+			const o = objectiveOf(id)
+			if (!o) continue
+			const old = c.aspirations?.find((a) => a.ranger === k && a.card === id)
+			out.push(old ?? { ranger: k, card: id, goal: o.goal, what: o.what, marks: 0, done: false })
+		}
+	})
+	return out
 }
 
 // ------------------------------------------------------------ building a Ranger

@@ -37,12 +37,17 @@ export type Amount =
 	| { tokens: 'self' }
 	| { all: true }
 	| { same: true }
+	/** Spirits within reach of the Ranger / along the way, plus n. */
+	| { spirits: 'reach' | 'along'; plus: number }
+	| { count: Filter; mult: number }
+	/** n, plus `bonus` if a tale is attached to that Ranger's role. */
+	| { n: number; tale: number }
 export type Who = 'you' | 'each' | 'that' | 'onSelf' | 'choose'
 
 export type Step =
 	| { k: 'addTok' | 'remTok'; what: 'progress' | 'harm' | 'tokens'; amt: Amount; to: Ref }
 	| { k: 'exhaust' | 'ready' | 'discard' | 'flip' | 'shuffleIn' | 'topOfPath' | 'faceDown'; to: Ref }
-	| { k: 'move'; to: Ref; area?: 'reach' | 'along' | 'other' | 'sameAsThat'; ranger?: 'other' }
+	| { k: 'move'; to: Ref; area?: 'reach' | 'along' | 'other' | 'sameAsThat'; ranger?: 'other'; noAmbush?: boolean }
 	| { k: 'fatigue' | 'injury' | 'soothe' | 'heal' | 'drawRanger' | 'drawPath' | 'scoutPath' | 'scoutRanger' | 'scoutChallenge'; amt: Amount; who?: Who }
 	| { k: 'fatiguesYou'; from: Ref }
 	| { k: 'rangerToken'; to: Ref | { r: 'roleToken' }; each?: boolean }
@@ -60,10 +65,30 @@ export type Step =
 	| { k: 'byChallenge'; sun: StepWhen[]; mountain: StepWhen[]; crest: StepWhen[] }
 	| { k: 'either'; a: StepWhen[]; b: StepWhen[]; la: string; lb: string }
 	| { k: 'energy'; n: number; aspect?: Aspect; gain: boolean }
-	| { k: 'moveTok'; what: 'progress' | 'harm'; from: Ref; to: Ref }
+	| { k: 'moveTok'; what: 'progress' | 'harm'; from: Ref; to: Ref; n?: number }
 	| { k: 'fromDiscard'; id: string }
 	| { k: 'extraPath'; n: number }
 	| { k: 'endRound' }
+	| { k: 'spiritspeak' }
+	| { k: 'spiritTest' }
+	| { k: 'searchDeck'; f: Filter }
+	/** Pay for an ability: exhaust the card and/or use its tokens (the rest stops if it can't). */
+	| { k: 'payCard'; uid: number; exhaust: boolean; use: number }
+	/** Pay for a Response moment from hand and discard it. */
+	| { k: 'payMoment'; id: string; ranger?: number }
+	/** Fatigue / injury that can no longer be prevented. */
+	| { k: 'hurt'; what: 'fatigue' | 'injury'; n: number; why: string }
+	| { k: 'note'; text: string }
+	| { k: 'record'; what: string; n: number }
+	/** Move a card from your discard (matching words) to the top of your fatigue stack / your hand. */
+	| { k: 'discardTo'; f: Filter; to: 'fatigue' | 'hand'; pick?: boolean }
+	| { k: 'fatigueToDeck'; n: number }
+	/** Place a card from your hand on top of your fatigue stack (optional), then `back` returns from discard to hand. */
+	| { k: 'handToFatigue'; back?: string; to?: 'discard' }
+	| { k: 'dropFatigue' }
+	/** Run a whole effect (with its condition) right after this one. */
+	| { k: 'effect'; eff: Effect }
+	| { k: 'playFound'; discount: number; skipLast?: number }
 
 /** A step with an optional condition ("If X, Y" in the middle of an effect). */
 export type StepWhen = Step & { when?: Cond }
@@ -85,6 +110,10 @@ export type Cond =
 	| { c: 'location'; name: string }
 	| { c: 'targetIs'; f: Filter }
 	| { c: 'tokenOn'; f: Filter }
+	| { c: 'thatZone'; zone: 'reach' | 'along' }
+	| { c: 'turns'; negate?: boolean }
+	| { c: 'spiritspeaking'; negate?: boolean }
+	| { c: 'not'; x: Cond }
 
 export interface Effect {
 	/** Text as printed (flavor removed), for the log and the card viewer. */
@@ -215,7 +244,7 @@ function refOf(p: string): Ref | null {
 
 /** One instruction → steps (null when not understood). */
 export function sentence(raw: string): Step[] | null {
-	let s = raw.trim().replace(/^then,?\s*/i, '').replace(/\.$/, '').trim()
+	let s = raw.trim().replace(/^then,?\s*/i, '').replace(/^you may\s+/i, '').replace(/\.$/, '').trim()
 	if (!s) return []
 	if (/^(x is|do not resolve|\(this alteration)/i.test(s)) return []
 	let m: RegExpMatchArray | null
@@ -225,6 +254,26 @@ export function sentence(raw: string): Step[] | null {
 		const b = sentence(m[2])
 		if (a?.length && b?.length) return [{ k: 'either', a, b, la: cap(m[1]), lb: cap(m[2]) }]
 	}
+	if (/^this is in addition to the test's standard effect$/i.test(s)) return []
+	if ((m = s.match(new RegExp(`^record ${N} (\\w+?)s?$`, 'i')))) return [{ k: 'record', what: m[2].toLowerCase(), n: num(m[1]) }]
+	if ((m = s.match(/^(?:choose|place) an? (.+?) (?:card )?(?:in|from) your ranger discard and (?:place it on top of your fatigue stack|add it to your hand)$/i)))
+		return [{ k: 'discardTo', f: { words: words(m[1]) }, to: /hand/i.test(s) ? 'hand' : 'fatigue', pick: true }]
+	if ((m = s.match(new RegExp(`^shuffle (?:the top card|up to ${N} cards?|${N} cards?) (?:of|from) your fatigue stack into your (?:ranger )?deck$`, 'i')))) return [{ k: 'fatigueToDeck', n: m[1] ? num(m[1]) : m[2] ? num(m[2]) : 1 }]
+	if ((m = s.match(/^move (.+?),? (?:treating it as if it does not have ambush|without ambush)$/i))) {
+		const to = refOf(m[1])
+		if (to) return [{ k: 'move', to, noAmbush: true }]
+	}
+	if ((m = s.match(new RegExp(`^move (?:up to )?${N}\\s*\\[(progress|harm)\\] from (.+?) to (.+?)(?: in the same area)?$`, 'i')))) {
+		const from = refOf(m[3])
+		const to = refOf(m[4])
+		if (from && to) return [{ k: 'moveTok', what: m[2].toLowerCase() as 'progress', from, to, n: num(m[1]) }]
+	}
+	if ((m = s.match(/^add 1\[(progress|harm)\] for every (\d+) effort to (.+)$/i))) {
+		const to = refOf(m[3])
+		if (to) return [{ k: 'addTok', what: m[1].toLowerCase() as 'progress', amt: { effort: true, per: Number(m[2]), mult: 1 }, to }]
+	}
+	if ((m = s.match(/^add (\w+?)s? equal to your effort to (this card|this \w+)$/i))) return [{ k: 'addTok', what: 'tokens', amt: { effort: true }, to: { r: 'self' } }]
+	if ((m = s.match(/^(?:discard|remove) all (?!\[)(\w+) from (this card|this \w+)$/i))) return [{ k: 'remTok', what: 'tokens', amt: { all: true }, to: { r: 'self' } }]
 	// guide
 	if ((m = s.match(/^\[guide\]\s*([\d.]+)$/i))) return [{ k: 'guide', entry: m[1].replace(/\.$/, '') }]
 
@@ -291,7 +340,7 @@ export function sentence(raw: string): Step[] | null {
 		const to = refOf(m[3])
 		if (amt && to) return [{ k: 'addTok', what: m[1] as 'harm', amt, to }]
 	}
-	if ((m = s.match(new RegExp(`^(?:discard|remove) (${N}|all)\\s*\\[(progress|harm)\\] from (.+)$`, 'i')))) {
+	if ((m = s.match(new RegExp(`^(?:discard|remove|spend) (${N}|all)\\s*\\[(progress|harm)\\] from (.+)$`, 'i')))) {
 		const to = refOf(m[4])
 		if (to) return [{ k: 'remTok', what: m[3].toLowerCase() as 'harm', amt: m[1] === 'all' ? { all: true } : { n: num(m[1]) }, to }]
 	}
@@ -308,6 +357,7 @@ export function sentence(raw: string): Step[] | null {
 		const to = refOf(m[3]) ?? { r: 'self' as const }
 		return [{ k: 'remTok', what: 'tokens', amt: m[4] ? { effort: true, per: Number(m[5]), mult: num(m[1]) } : { n: num(m[1]) }, to }]
 	}
+	if ((m = s.match(new RegExp(`^(?:discard|remove) ${N} tokens? from (?:one of your equipped |an? )(\\w+)$`, 'i')))) return [{ k: 'remTok', what: 'tokens', amt: { n: num(m[1]) }, to: { r: 'choose', f: { words: [singular(m[2])] } } }]
 	if ((m = s.match(/^add (\d+) (\w+) to this card$/i))) return [{ k: 'addTok', what: 'tokens', amt: { n: Number(m[1]) }, to: { r: 'self' } }]
 	if ((m = s.match(new RegExp(`^add ${N} tokens? to (the attached \\w+|an? [\\w ]+?)$`, 'i')))) {
 		const to = /attached/.test(m[2]) ? ({ r: 'host' } as Ref) : ({ r: 'choose', f: { words: words(m[2].replace(/ card$/, '')) } } as Ref)
@@ -379,6 +429,9 @@ export function sentence(raw: string): Step[] | null {
 	if ((m = s.match(/^each ranger exhausts their role$/i))) return [{ k: 'exhaustRole', who: 'each' }]
 	if (/^each ranger moves their \[ranger\] to (it|this \w+)$/i.test(s)) return [{ k: 'rangerToken', to: { r: 'self' }, each: true } as Step]
 	if (/^choose a ranger$/i.test(s)) return []
+	if (/^spiritspeak$/i.test(s)) return [{ k: 'spiritspeak' }]
+	if (/^perform a spirit speaker test$/i.test(s)) return [{ k: 'spiritTest' }]
+	if ((m = s.match(/^search your (?:ranger )?deck for an? (.+?) and add it to your hand$/i))) return [{ k: 'searchDeck', f: { words: words(m[1]) } }]
 	if ((m = s.match(new RegExp(`^(spend|gain) ${N} (?:\\[(AWA|FIT|FOC|SPI)\\] )?energy(?: of any type)?$`, 'i'))))
 		return [{ k: 'energy', n: num(m[2]), aspect: m[3]?.toUpperCase() as Aspect | undefined, gain: m[1].toLowerCase() === 'gain' }]
 	if ((m = s.match(new RegExp(`^gain ${N} \\[?(AWA|FIT|FOC|SPI)\\]?$`, 'i')))) return [{ k: 'energy', n: num(m[1]), aspect: m[2].toUpperCase() as Aspect, gain: true }]
@@ -388,9 +441,9 @@ export function sentence(raw: string): Step[] | null {
 		if (from && to) return [{ k: 'moveTok', what: m[1].toLowerCase() as 'progress', from, to }]
 	}
 	// "Add 1[harm] to a flora to add 3[progress] to a trail": pay, then the effect
-	if ((m = s.match(/^(.+?) to (add|soothe|exhaust|move|draw|scout|heal|gain|ready|discard|search|suffer|return|attach|commit|dodge) (.+)$/i)) && /^(add|discard|spend|suffer|exhaust|remove|use|return)\b/i.test(m[1])) {
+	if ((m = s.match(/^(.+?) to (add|soothe|exhaust|move|draw|scout|heal|gain|ready|discard|search|suffer|return|attach|commit|dodge|spiritspeak) ?(.*)$/i)) && /^(add|discard|spend|suffer|exhaust|remove|use|return)\b/i.test(m[1])) {
 		const a = sentence(m[1])
-		const b = sentence(`${m[2]} ${m[3]}`)
+		const b = sentence(`${m[2]} ${m[3]}`.trim())
 		if (a?.length && b?.length) return [...a, ...b]
 	}
 	if ((m = s.match(new RegExp(`^that ranger (soothes|suffers|draws) ${N} (fatigue|injur(?:y|ies)|ranger cards?)$`, 'i'))))
@@ -414,6 +467,9 @@ export function condition(raw: string): Cond | null {
 	}
 	if ((m = s.match(/^this \w+ is within reach of (?:a|any) ranger$/i))) return { c: 'selfZone', zone: 'reach' }
 	if (/^you suffered fatigue during this test$/i.test(s)) return { c: 'fatiguedTest' }
+	if ((m = s.match(/^(?:it|that \w+) is (within reach|along the way)$/i))) return { c: 'thatZone', zone: /reach/i.test(m[1]) ? 'reach' : 'along' }
+	if ((m = s.match(/^it is (not )?a Ranger's turn$/i))) return { c: 'turns', negate: !!m[1] }
+	if ((m = s.match(/^you are (not )?spiritspeaking$/i))) return { c: 'spiritspeaking', negate: !!m[1] }
 	if ((m = s.match(/^(.+?) is the current location$/i))) return { c: 'location', name: m[1] }
 	if ((m = s.match(/^you are interacting with an? (.+)$/i))) return { c: 'targetIs', f: { words: words(m[1]) } }
 	if ((m = s.match(/^your \[ranger\] is on an? (.+)$/i))) return { c: 'tokenOn', f: { words: words(m[1]) } }
@@ -474,7 +530,7 @@ export function effect(rawIn: string): Effect {
 	let cond: Cond | undefined
 	let pre: StepWhen[] = []
 	let auto = true
-	const VERB = '(?:add|exhaust|ready|draw|soothe|suffer|heal|move|discard|scout|search|attach|remove|return|shuffle|place|flip|each ranger)'
+	const VERB = '(?:add|exhaust|ready|draw|soothe|suffer|heal|move|discard|scout|search|attach|remove|return|shuffle|place|flip|record|each ranger)'
 	const clauses = (b: string) =>
 		b
 			.split(new RegExp(`,? and (?=${VERB}\\b)|,\\s+(?=${VERB}\\b)`, 'i'))

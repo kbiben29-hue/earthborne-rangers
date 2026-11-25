@@ -42,6 +42,10 @@ export interface Ranger {
 	token: number | null
 	/** Card list the deck was built from (for the campaign). */
 	deckList: string[]
+	/** Stewards of the Valley: spiritspeaking (Spirit Speaker tests replace the common tests until the role readies). */
+	spiritspeak?: boolean
+	/** Descendant of the Guide: one Spirit Speaker test may be performed. */
+	spiritOnce?: boolean
 }
 
 /** An effect being carried out (card text the engine runs step by step). */
@@ -96,6 +100,8 @@ export type Prompt =
 			fatigued: number
 	  }
 	| { kind: 'choose'; title: string; text: string; options: number[]; min: number; max: number; key: string; ranger: number }
+	/** Pick a card in a Ranger's hand (or discard pile). */
+	| { kind: 'pickHand'; title: string; text: string; ranger: number; key: string; from: 'hand' | 'discard'; options: number[]; optional: boolean }
 	| { kind: 'ask'; title: string; text: string; ranger: number; yes?: string; no?: string }
 	| { kind: 'manual'; title: string; text: string; ranger: number }
 	| { kind: 'aspect'; title: string; text: string; ranger: number; options: Aspect[]; key: string }
@@ -110,6 +116,8 @@ export interface Game {
 	rng: { seed: number }
 	day: number
 	rangers: Ranger[]
+	/** Aspiration records made today, by name ("seed", "improvement"…) and Ranger. */
+	records?: { ranger: number; what: string; n: number }[]
 	inst: Record<number, Inst>
 	next: number
 	pathDeck: string[]
@@ -163,10 +171,13 @@ export type Intent =
 			boosts?: number[]
 			swap?: boolean
 			responses?: number[]
+			/** Keys of TestOptions.extras to use. */
+			extras?: string[]
 			versatile?: number[]
 	  }
 	| { t: 'cancelTest' }
 	| { t: 'choose'; uids: number[] }
+	| { t: 'pickHand'; index: number | null }
 	| { t: 'answer'; yes: boolean }
 	| { t: 'manualDone' }
 	| { t: 'aspect'; a: Aspect }
