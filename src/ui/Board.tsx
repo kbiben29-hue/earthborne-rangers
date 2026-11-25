@@ -1127,7 +1127,7 @@ function Guide({ entry, why, pack, dispatch, hooks }: { entry: string; why: stri
 			<button className="primary" onClick={() => setOpen(true)}>
 				📖 Open entry {entry}
 			</button>
-			{open && <GuideWindow entry={entry} pack={GUIDE_PACK[pack ?? 'Core'] ?? 'ebr'} onClose={() => setOpen(false)} />}
+			{open && <GuideWindow entry={entry} pack={GUIDE_PACK[pack ?? 'Core'] ?? 'ebr'} onClose={() => setOpen(false)} rewards={hooks.rewards} onUnlock={hooks.unlockReward} />}
 			<div className="row-input">
 				<input placeholder="Notable event to record (optional)" value={note} onChange={(e) => setNote(e.target.value)} />
 				<button

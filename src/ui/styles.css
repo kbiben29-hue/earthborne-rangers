@@ -2109,3 +2109,20 @@ body:has(.drawer-body) .lesson-card {
 	background: #ffd45a;
 	color: #2a1c00;
 }
+.guide-rewards {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	align-items: center;
+	padding: 8px 14px;
+	background: #fff4d6;
+	border-top: 1px solid #0001;
+}
+.guide-rewards small {
+	flex-basis: 100%;
+	color: #6b6556;
+}
+.guide-rewards .got {
+	color: #2e6b4f;
+	font-weight: 700;
+}

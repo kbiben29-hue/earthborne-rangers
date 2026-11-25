@@ -395,7 +395,7 @@ export function CampaignView({ c, update, startDay, resume, back }: { c: Campaig
 	}, [guiding, gk])
 	return (
 		<div className="screen campaign">
-			{guide && <GuideWindow entry={guide} onClose={() => setGuide(null)} />}
+			{guide && <GuideWindow entry={guide} onClose={() => setGuide(null)} rewards={c.rewards} onUnlock={(id) => set({ rewards: [...new Set([...c.rewards, id])] })} />}
 			{guiding && gk < steps.length && !guide && <Spotlight step={gs} index={gk} total={steps.length} label="Setup guide" onNext={() => setGk(gk + 1)} onBack={() => setGk(Math.max(0, gk - 1))} onSkip={() => set({ guided: false })} />}
 			<div className="row-between">
 				<button onClick={back}>← Campaigns</button>
@@ -546,6 +546,10 @@ export function CampaignView({ c, update, startDay, resume, back }: { c: Campaig
 				<summary>
 					<h3>Rewards unlocked</h3>
 				</summary>
+				<p className="sub">
+					Reward cards are unlocked when the campaign guide says “Gain the … reward card” (usually after a mission or a story moment). When you open such an entry here or during a day, the
+					window shows an “Unlock” button for it. You can also pick one from the list below. Unlocked rewards can be swapped into a Ranger’s deck after a day that ended by camping.
+				</p>
 				<div className="hand mini">
 					{c.rewards.map((id) => (
 						<HandCard key={id} id={id} />
@@ -555,7 +559,7 @@ export function CampaignView({ c, update, startDay, resume, back }: { c: Campaig
 					<select value={reward} onChange={(e) => setReward(e.target.value)}>
 						<option value="">Unlock a reward…</option>
 						{rewardCards()
-							.filter((r) => r.pack === 'Core' && !c.rewards.includes(r.id))
+							.filter((r) => ['Core', ...(c.expansions ?? [])].includes(r.pack) && !/Personal Reward/i.test(r.text ?? '') && !c.rewards.includes(r.id))
 							.map((r) => (
 								<option key={r.id} value={r.id}>
 									{r.name}

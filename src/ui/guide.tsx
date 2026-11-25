@@ -2,6 +2,7 @@
 // from earthborne.build's copy of the campaign guides (github.com/harababurel/earthborne.build), which
 // mirrors The Living Valley (thelivingvalley.earthbornegames.com).
 import { useEffect, useRef, useState } from 'react'
+import { CARDS } from '../data/data'
 
 const RAW = 'https://raw.githubusercontent.com/harababurel/earthborne.build/main/frontend/src/assets/'
 const SITE = 'https://earthborne.build/rules?tab=campaign-guides'
@@ -49,10 +50,26 @@ function sanitize(el: Element) {
 	})
 }
 
-export function GuideWindow({ entry, pack = 'ebr', onClose }: { entry: string; pack?: GuidePack; onClose: () => void }) {
+const norm = (s: string) => s.toLowerCase().replace(/[’']/g, "'").replace(/[^a-z0-9']/g, '')
+/** Reward cards an entry tells you to gain: "Gain the Harvest Crown reward card." / "Gain the following reward cards: A, B and C." */
+export function rewardsIn(text: string): string[] {
+	const names: string[] = []
+	for (const m of text.matchAll(/gain the ([^.]+?) reward cards?\b/gi)) names.push(m[1])
+	for (const m of text.matchAll(/gain the following reward cards?:\s*([^.]+)\./gi)) names.push(...m[1].split(/,\s*(?:and\s+)?|\s+and\s+/))
+	const rewards = Object.values(CARDS).filter((c) => c.back === 'player' && /^Rewards?$/.test(c.set))
+	const ids = names
+		.map((n) => n.trim())
+		.filter(Boolean)
+		.map((n) => rewards.find((c) => norm(c.name) === norm(n))?.id)
+		.filter((x): x is string => !!x)
+	return [...new Set(ids)]
+}
+
+export function GuideWindow({ entry, pack = 'ebr', onClose, rewards, onUnlock }: { entry: string; pack?: GuidePack; onClose: () => void; rewards?: string[]; onUnlock?: (id: string) => void }) {
 	const [cur, setCur] = useState<{ anchor: string | null; title: string }>({ anchor: null, title: `Entry ${entry}` })
 	const [html, setHtml] = useState<string | null>(null)
 	const [err, setErr] = useState<string | null>(null)
+	const [found, setFound] = useState<string[]>([])
 	const body = useRef<HTMLDivElement>(null)
 
 	const show = async (anchor: string | null) => {
@@ -68,6 +85,7 @@ export function GuideWindow({ entry, pack = 'ebr', onClose }: { entry: string; p
 			sanitize(copy)
 			setCur({ anchor, title: page.querySelector('h3')?.textContent ?? `Entry ${entry}` })
 			setHtml(copy.innerHTML)
+			setFound(rewardsIn(copy.textContent ?? ''))
 		} catch {
 			setCur((c) => ({ ...c, anchor }))
 			setErr('The guide could not be loaded here.')
@@ -126,6 +144,23 @@ export function GuideWindow({ entry, pack = 'ebr', onClose }: { entry: string; p
 					)}
 					{html && <div className="guide-text" dangerouslySetInnerHTML={{ __html: html }} />}
 				</div>
+				{onUnlock && found.length > 0 && (
+					<div className="guide-rewards">
+						<b>🎁 This entry gives reward cards:</b>
+						{found.map((id) =>
+							rewards?.includes(id) ? (
+								<span key={id} className="got">
+									✓ {CARDS[id].name}
+								</span>
+							) : (
+								<button key={id} className="primary" onClick={() => onUnlock(id)}>
+									Unlock {CARDS[id].name}
+								</button>
+							),
+						)}
+						<small>Only unlock them if you are following that part of the entry (some entries depend on a choice or an IF).</small>
+					</div>
+				)}
 				<p className="guide-credit">Campaign guide text from The Living Valley by Earthborne Games, via earthborne.build. Spoilers ahead: read only the entry you were sent to.</p>
 			</div>
 		</div>
