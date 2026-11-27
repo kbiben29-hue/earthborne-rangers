@@ -22,6 +22,9 @@ import {
 	SPECIALTIES,
 	weatherOptions,
 	weatherForDay,
+	dailyWeather,
+	entriesForDay,
+	WEATHER_MODES,
 	type Build,
 	type Campaign,
 	type CampaignRanger,
@@ -354,6 +357,45 @@ export function Builder({ done, cancel }: { done: (r: CampaignRanger) => void; c
 
 const WEATHER_GLYPH: Record<string, string> = { '01373': '☀', '01374': '☂', '01375': '≋' }
 
+/** "Write entry X above day Y" (the campaign guide asks for this). */
+function DayEntries({ c, set }: { c: Campaign; set: (p: Partial<Campaign>) => void }) {
+	const [day, setDay] = useState(String(c.day + 1))
+	const [entry, setEntry] = useState('')
+	const all = Object.entries(c.dayEntries ?? {}).filter(([d, l]) => Number(d) >= c.day && l.length)
+	return (
+		<details className="day-entries">
+			<summary>The guide says to write an entry above a day?</summary>
+			<div className="row-input">
+				<input inputMode="decimal" placeholder="Entry" value={entry} onChange={(e) => setEntry(e.target.value)} style={{ width: '6em' }} />
+				<span>above day</span>
+				<input inputMode="numeric" value={day} onChange={(e) => setDay(e.target.value)} style={{ width: '4em' }} />
+				<button
+					disabled={!entry.trim() || !(Number(day) >= 1)}
+					onClick={() => {
+						const d = Number(day)
+						set({ dayEntries: { ...(c.dayEntries ?? {}), [d]: [...new Set([...(c.dayEntries?.[d] ?? []), entry.trim()])] } })
+						setEntry('')
+					}}
+				>
+					Write it
+				</button>
+			</div>
+			{all.length > 0 && (
+				<ul>
+					{all.map(([d, l]) => (
+						<li key={d}>
+							Day {d}: {l.join(', ')}{' '}
+							<button className="link" onClick={() => set({ dayEntries: { ...c.dayEntries, [d]: [] } })}>
+								remove
+							</button>
+						</li>
+					))}
+				</ul>
+			)}
+		</details>
+	)
+}
+
 export function CampaignView({ c, update, startDay, resume, back }: { c: Campaign; update: (c: Campaign) => void; startDay: (c: Campaign) => void; resume: () => void; back: () => void }) {
 	const [ev, setEv] = useState('')
 	const [mission, setMission] = useState('')
@@ -420,11 +462,14 @@ export function CampaignView({ c, update, startDay, resume, back }: { c: Campaig
 			<div className="tracker" data-guide="days">
 				<div className="days">
 					{Array.from({ length: c.day > 30 ? 45 : 30 }, (_, k) => {
-						const w = weatherForDay(k + 1)
+						const w = dailyWeather(c, k + 1)
 						return (
-							<span key={k} className={`day ${k + 1 < c.day ? 'past' : k + 1 === c.day ? 'now' : ''}`} title={`Day ${k + 1}: ${card(w).name}`}>
+							<span key={k} className={`day ${k + 1 < c.day ? 'past' : k + 1 === c.day ? 'now' : ''}`} title={`Day ${k + 1}: ${card(w).name}${entriesForDay(c, k + 1).length ? ` · read entry ${entriesForDay(c, k + 1).join(', ')}` : ''}`}>
 								{k + 1}
-								<i className="wx">{WEATHER_GLYPH[w] ?? ''}</i>
+								<i className="wx">
+									{WEATHER_GLYPH[w] ?? ''}
+									{entriesForDay(c, k + 1).length > 0 && k + 1 > 1 ? '📖' : ''}
+								</i>
 							</span>
 						)
 					})}
@@ -450,7 +495,23 @@ export function CampaignView({ c, update, startDay, resume, back }: { c: Campaig
 							</button>
 						</p>
 					)}
-					<p className="sub">Read any campaign guide entries listed above day {c.day} on your campaign tracker.</p>
+					{entriesForDay(c, c.day).length > 0 && !(c.day === 1 && c.history.length === 0) ? (
+						<p className="guide-note">
+							📖 Listed above day {c.day} on the tracker:{' '}
+							{entriesForDay(c, c.day).map((e, k) => (
+								<span key={e}>
+									{k > 0 && ', '}
+									<button className="link" onClick={() => setGuide(e)}>
+										entry {e}
+									</button>
+								</span>
+							))}
+							{'. '}The game opens {entriesForDay(c, c.day).length > 1 ? 'them' : 'it'} for you when the day starts.
+						</p>
+					) : (
+						<p className="sub">No campaign guide entries are listed above day {c.day}.</p>
+					)}
+					<DayEntries c={c} set={set} />
 					<label className="field" data-guide="location">
 						Current location
 						<select value={c.location} onChange={(e) => set({ location: e.target.value })}>
@@ -473,9 +534,19 @@ export function CampaignView({ c, update, startDay, resume, back }: { c: Campaig
 						</select>
 					</label>
 					<label className="field" data-guide="weather">
-						Weather <small>(the tracker says {card(weatherForDay(c.day)).name} for day {c.day})</small>
-						<select value={c.weather} onChange={(e) => set({ weather: e.target.value, weatherManual: e.target.value !== weatherForDay(c.day) })}>
+						Weather <small>({c.weatherMode && c.weatherMode !== 'tracker' ? 'difficulty setting' : 'the tracker says'}: {card(dailyWeather(c, c.day)).name} for day {c.day})</small>
+						<select value={c.weather} onChange={(e) => set({ weather: e.target.value, weatherManual: e.target.value !== dailyWeather(c, c.day) })}>
 							{weatherOptions(c).map((w) => (
+								<option key={w.id} value={w.id}>
+									{w.label}
+								</option>
+							))}
+						</select>
+					</label>
+					<label className="field">
+						Weather each day (difficulty)
+						<select value={c.weatherMode ?? 'tracker'} onChange={(e) => set({ weatherMode: e.target.value, weather: dailyWeather({ weatherMode: e.target.value }, c.day), weatherManual: false })}>
+							{WEATHER_MODES.map((w) => (
 								<option key={w.id} value={w.id}>
 									{w.label}
 								</option>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { deleteCampaign, finishDay, loadAll, newCampaign, saveCampaign, tutorialCampaign, type Campaign } from './campaign/campaign'
+import { deleteCampaign, entriesForDay, finishDay, loadAll, newCampaign, saveCampaign, tutorialCampaign, type Campaign } from './campaign/campaign'
 import { migrate, newDay, tryApply } from './engine/engine'
 import type { Game, Intent } from './engine/types'
 import { Board } from './ui/Board'
@@ -69,6 +69,7 @@ export default function App() {
 			rewards: c.rewards,
 			lead: c.lead,
 			packs: c.expansions ?? [],
+			entries: c.tutorial || (c.day === 1 && c.history.length === 0) ? [] : entriesForDay(c, c.day),
 		})
 		if (c.tutorial) {
 			tutorialSetup(g)

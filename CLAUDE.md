@@ -84,7 +84,8 @@ npm run data    # scripts/build-game-data.mjs → src/data/game.json
    Clay, Spirit of the Verdessa, Atrox / Irix / Lutrinal Spirits, Carbonforged Drum, The Better Part of
    Valor, Go Forth Fearless Ranger, The Tale of Two Rivers, Needle Moss, Transverse Ocarina (ready),
    Conductor, Influential, Gratitude of the Valley, Superior Trail, Brightfruit Tree's response.
-2. Campaign tracker weather schedule per day (from the printed tracker) and day-30 handling.
+2. Done: tracker weather per day (`WEATHER_SCHEDULE`, `weatherMode` difficulty), entries above days
+   (`entriesForDay`, `dayEntries`), days 31–45. Rules audit vs the rulebook: `src/engine/rules.test.ts`.
 3. Online play with a friend (PeerJS, like Afterlife).
 4. Expansion order agreed with Kris: SoV (done, see above) → Spire in Bloom + Shadow of the Storm (in: campaign
    `expansions`, `g.packs`, `setAll()` merges sets across packs, `buildPathDeck` reads the location's `pda`

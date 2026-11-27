@@ -25,6 +25,8 @@ export interface Inst {
 	kind: 'path' | 'ranger' | 'location' | 'weather' | 'mission' | 'role'
 	/** A path moment that stays (placed in the surroundings) instead of being discarded. */
 	kept?: boolean
+	/** Clearing: its Clear effects are resolving; it's discarded after them if it still has enough tokens. */
+	clearing?: 'progress' | 'harm' | 'ranger'
 }
 
 export interface Ranger {
@@ -68,7 +70,9 @@ export interface Job {
 	/** Answer to an "ask" condition. */
 	asked?: boolean
 	/** Fully internal job (end of test, new round…). */
-	sys?: 'finishTest' | 'newRound' | 'endTurn' | 'momentDone' | 'drawPath' | 'moments'
+	sys?: 'finishTest' | 'newRound' | 'endTurn' | 'momentDone' | 'drawPath' | 'moments' | 'readyAll' | 'clearDone'
+	/** A challenge effect: skipped if its card was cleared or exhausted earlier in the test. */
+	chal?: boolean
 	/** finishTest of a path moment's test: no turn ends. */
 	noTurn?: boolean
 	/** Answer to a choice with more than two options. */

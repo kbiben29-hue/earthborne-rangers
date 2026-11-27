@@ -385,7 +385,7 @@ function candidates(g: Game, f: Filter, job: Job): number[] {
 
 // ---------------------------------------------------------------- running effects
 
-export type NewJob = Pick<Job, 'title' | 'eff' | 'src' | 'ranger'> & Partial<Pick<Job, 'effort' | 'target' | 'that' | 'sys' | 'challenge'>>
+export type NewJob = Pick<Job, 'title' | 'eff' | 'src' | 'ranger'> & Partial<Pick<Job, 'effort' | 'target' | 'that' | 'sys' | 'challenge' | 'chal'>>
 export function addJob(g: Game, j: NewJob, where: 'front' | 'end' = 'end') {
 	const job: Job = { effort: 0, target: null, that: null, stage: 'cond', i: 0, picks: {}, ...j }
 	if (where === 'front') g.jobs.unshift(job)
@@ -797,9 +797,23 @@ function runStep(g: Game, s: Step & { when?: Cond }, job: Job, key: string): 'ok
 		case 'searchSet': {
 			const set = s.set.replace(/^the /i, '')
 			const pool = s.random ? shuffle(setAll(g, set), g.rng) : setAll(g, set)
-			const inUse = new Set([...g.pathDeck, ...g.pathDiscard, ...Object.values(g.inst).map((i) => i.id)])
+			// copies of each card already in use (path deck, discard, in play)
+			const used = new Map<string, number>()
+			for (const x of [...g.pathDeck, ...g.pathDiscard, ...Object.values(g.inst).map((i) => i.id)]) used.set(x, (used.get(x) ?? 0) + 1)
+			const inUse = { has: (x: string) => (used.get(x) ?? 0) >= pool.filter((y) => y === x).length, add: (x: string) => used.set(x, (used.get(x) ?? 0) + 1) }
 			for (let k = 0; k < (s.n ?? 1); k++) {
-				const id = pool.find((x) => fakeMatch(x, s.f) && !inUse.has(x)) ?? pool.find((x) => fakeMatch(x, s.f))
+				let id = pool.find((x) => fakeMatch(x, s.f) && !inUse.has(x))
+				// Rulebook, Search: a set in use is searched through the path deck and discard
+				if (!id) {
+					for (const pile of [g.pathDeck, g.pathDiscard]) {
+						const j = pile.findIndex((x) => fakeMatch(x, s.f) && pool.includes(x))
+						if (j < 0) continue
+						id = pile.splice(j, 1)[0]
+						used.set(id, (used.get(id) ?? 1) - 1)
+						if (pile === g.pathDeck) g.pathDeck = shuffle(g.pathDeck, g.rng)
+						break
+					}
+				}
 				if (!id) {
 					log(g, `No ${s.f.words?.join(' or ')} in the ${s.set} set.`)
 					break
@@ -1305,6 +1319,12 @@ function runJobs(g: Game) {
 			continue
 		}
 		if (job.stage === 'cond') {
+			// Rulebook, Challenge Effects: cards cleared or exhausted by the test or an earlier challenge effect don't resolve theirs.
+			const si = job.chal && job.src != null ? g.inst[job.src] : null
+			if (job.chal && (!si || (si.exhausted && si.kind === 'path') || (si.exhausted && si.kind === 'ranger'))) {
+				g.jobs.shift()
+				continue
+			}
 			if (job.eff.cond) {
 				const v = evalCond(g, job.eff.cond, job)
 				if (v === null) return
@@ -1386,6 +1406,12 @@ function sysJob(g: Game, job: Job) {
 		}
 		case 'moments':
 			addMoments(g, g.inst[g.location]?.id)
+			return
+		case 'readyAll':
+			readyAll(g)
+			return
+		case 'clearDone':
+			if (job.target != null) clearDone(g, job.target)
 			return
 	}
 }
@@ -1472,7 +1498,8 @@ function offers(g: Game, ev: Ev): Offer[] {
 function offerJob(g: Game, o: Offer, ev: Ev, prefix: Step[] = [], declineTo: Step[] = []): NewJob {
 	const pay: Step[] = o.moment ? [{ k: 'payMoment', id: o.id, ranger: o.ctl }] : o.a.kind === 'exhaust' || o.a.kind === 'use' ? [{ k: 'payCard', uid: o.src!, exhaust: o.a.kind === 'exhaust', use: o.a.use ?? 0 }] : []
 	const body = [...pay, ...prefix, ...o.a.effect.pre, ...o.a.effect.steps]
-	const optional = o.moment || o.a.kind !== 'other' || /\byou may\b/i.test(o.a.text) || declineTo.length > 0
+	// Rulebook, Response: responses on cards in play must resolve if possible (unless they say "may"); moments from hand and costs are a choice
+	const optional = o.moment || o.a.kind === 'exhaust' || o.a.kind === 'use' || /\byou may\b/i.test(o.a.text) || declineTo.length > 0
 	const name = card(o.id).name
 	const short = o.a.effect.text.length > 90 ? o.a.effect.text.slice(0, 88) + '…' : o.a.effect.text
 	const steps: Step[] = optional ? [{ k: 'either', a: body, b: declineTo, la: `${o.moment ? 'Play' : 'Use'} ${name}: ${short}`, lb: declineTo.length ? 'Take it' : 'Not now' }] : body
@@ -1617,6 +1644,9 @@ function startTest(g: Game, it: Extract<Intent, { t: 'test' }>): string | null {
 		if (t.targets && !commonTargetOk(g, t.key, target!)) return `${name} needs a ${t.targets}.`
 	} else {
 		if (it.src == null || !g.inst[it.src]) return 'That card is no longer in play.'
+		const si = g.inst[it.src]
+		// Rulebook, Tests: any card in play except cards in other Rangers' player areas
+		if (si.zone === 'player' && si.owner != null && si.owner !== r) return `${nameOf(g, it.src)} is in ${rangerName(g, si.owner)}'s player area.`
 		const t = P(g, it.src).tests[it.test]
 		if (!t) return 'Unknown test.'
 		;({ aspect, approach, name, diff } = t)
@@ -1624,6 +1654,8 @@ function startTest(g: Game, it: Extract<Intent, { t: 'test' }>): string | null {
 		if (t.use && g.inst[it.src].tokens < t.use) return `${nameOf(g, it.src)} has no tokens left to use.`
 	}
 	if (g.rangers[r].energy[aspect] < 1) return `${rangerName(g, r)} needs at least 1 ${aspect} energy.`
+	// Rulebook, Friendly: a weapon can't affect a friendly card
+	if (typeof it.test === 'number' && it.src != null && target != null && target !== it.src && traitsOf(g, it.src).includes('weapon') && has(g, target, 'Friendly')) return `${nameOf(g, it.src)} is a weapon: it can't affect ${nameOf(g, target)} (friendly).`
 	const ob = blockedBy(g, r, target)
 	if (ob != null) return `${nameOf(g, ob)} (obstacle) is in the way.`
 	const err = beginTurn(g, r, it.useRole)
@@ -2047,7 +2079,7 @@ function commit(g: Game, it: Extract<Intent, { t: 'commit' }>): string | null {
 			})
 			continue
 		}
-		addJob(g, { title: `${nameOf(g, u)} ${SYM_LABEL[ch.symbol]}`, eff: e, src: u, ...base0 })
+		addJob(g, { title: `${nameOf(g, u)} ${SYM_LABEL[ch.symbol]}`, eff: e, src: u, chal: true, ...base0 })
 	}
 	addJob(g, SYS('finishTest', r, { challenge: ci, noTurn: pr.mt != null }))
 	// A path moment's test resolves right away, before the rest of the moment.
@@ -2121,29 +2153,49 @@ function moveCard(g: Game, uid: number, zone: 'along' | 'reach' | 'surroundings'
 
 // ---------------------------------------------------------------- clearing
 
+/** Which token type clears this card now (null: it doesn't). */
+function clearsBy(g: Game, i: Inst): 'progress' | 'harm' | 'ranger' | null {
+	const pt = threshold(g, i.uid, 'prog')
+	const ht = threshold(g, i.uid, 'harm')
+	if (pt === 'ranger' && g.rangers.every((r) => r.token === i.uid)) return 'ranger'
+	if (typeof pt === 'number' && pt > 0 && i.progress >= pt) return 'progress'
+	if (typeof ht === 'number' && ht > 0 && i.harm >= ht) return 'harm'
+	return null
+}
+/**
+ * Rulebook, Clear: resolve its "Clear" effects first, then discard it if it still has enough tokens,
+ * then "after it is cleared" effects.
+ */
 function checkClears(g: Game) {
 	if (g.ended) return
 	for (const i of Object.values(g.inst)) {
-		if (!g.inst[i.uid] || i.faceDown || i.kind === 'location' || i.kind === 'mission' || i.kind === 'weather' || i.kind === 'role') continue
-		const pt = threshold(g, i.uid, 'prog')
-		const ht = threshold(g, i.uid, 'harm')
-		let how: 'progress' | 'harm' | 'ranger' | null = null
-		if (pt === 'ranger' && g.rangers.every((r) => r.token === i.uid)) how = 'ranger'
-		else if (typeof pt === 'number' && pt > 0 && i.progress >= pt) how = 'progress'
-		if (!how && typeof ht === 'number' && ht > 0 && i.harm >= ht) how = 'harm'
+		if (!g.inst[i.uid] || i.faceDown || i.clearing || i.kind === 'location' || i.kind === 'mission' || i.kind === 'weather' || i.kind === 'role') continue
+		const how = clearsBy(g, i)
 		if (!how) continue
 		const p = P(g, i.uid)
-		const eff = p.clear.find((c) => c.on.includes(how!)) ?? p.clear[0]
+		const eff = p.clear.find((c) => c.on.includes(how)) ?? p.clear[0]
 		const name = nameOf(g, i.uid)
 		log(g, `${name} clears (${how}).`)
 		const r = g.acting ?? g.lead
-		if (eff) addJob(g, { title: `${name} clears`, eff: eff.effect, src: null, ranger: r }, 'front')
-		fire(g, { e: 'clear', ranger: r, uid: i.uid, how, host: i.attachedTo, words: [], presence: presence(g, i.uid) })
-		removeInst(g, i.uid, 'discard')
+		i.clearing = how
+		const done: Job = { ...(SYS('clearDone', r, { target: i.uid }) as Job), effort: 0, that: null, stage: 'cond', i: 0, picks: {} }
+		if (eff) {
+			addJob(g, { title: `${name} clears`, eff: eff.effect, src: i.uid, ranger: r }, 'front')
+			g.jobs.splice(1, 0, done)
+		} else g.jobs.unshift(done)
 	}
 }
-
-// ---------------------------------------------------------------- playing cards
+function clearDone(g: Game, uid: number) {
+	const i = g.inst[uid]
+	if (!i || !i.clearing) return
+	const how = i.clearing
+	i.clearing = undefined
+	// a Clear effect may have flipped it, moved its tokens or returned it to the collection
+	if (!clearsBy(g, i)) return
+	const r = g.acting ?? g.lead
+	fire(g, { e: 'clear', ranger: r, uid, how, host: i.attachedTo, words: [], presence: presence(g, uid) })
+	removeInst(g, uid, 'discard')
+}
 
 export function costOf(id: string): number | 'X' {
 	const c = card(id)
@@ -2324,11 +2376,71 @@ export function setAll(g: Game, name: string): string[] {
 	return out.length ? out : all(name.replace(/^The /, '')).length ? all(name.replace(/^The /, '')) : all(`The ${name}`)
 }
 const PDA_SETS: Record<string, string> = { Othrwoods: 'The Othrwoods', Otherwoods: 'The Othrwoods' }
+const NUM_WORD: Record<string, number> = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6 }
+/** "2 Cloudhive Swarms and 1 Cloudhive", "an Icy Path", "two Strong Currents" → [name, count]. */
+function itemList(t: string): [string, number][] {
+	return t
+		.split(/,\s*(?:and\s+)?|\s+and\s+/)
+		.map((x) => x.trim().replace(/^the\s+/i, ''))
+		.filter(Boolean)
+		.map((x) => {
+			const m = x.match(/^(\d+|a|an|one|two|three|four|five|six)\s+(.+)$/i)
+			return m ? ([m[2], /^\d+$/.test(m[1]) ? Number(m[1]) : NUM_WORD[m[1].toLowerCase()]] as [string, number]) : ([x, 1] as [string, number])
+		})
+}
+/** Path cards by name (plural or not) from a set, or from every path card of the packs in use. */
+function pathCardsNamed(g: Game, set: string | null, name: string, n: number): string[] {
+	const k = name.toLowerCase().replace(/^the /, '').replace(/s$/, '')
+	const pool = set ? setAll(g, set) : (g.packs ?? ['Core']).flatMap((p) => Object.values(CARDS).filter((c) => c.pack === p && c.back === 'path').flatMap((c) => Array<string>(c.qty ?? 1).fill(c.id)))
+	return pool.filter((id) => card(id).name.toLowerCase().replace(/^the /, '').replace(/s$/, '') === k).slice(0, n)
+}
+/**
+ * "Path Deck Assembly:" on the weather and missions (rulebook, Build the Path Deck: other path cards).
+ * Returns what to change; anything not understood is left for the players to do by hand.
+ */
+function otherAssembly(g: Game, loc: CardDef, terrain: string) {
+	const out = { terrain: null as string | null, cards: [] as string[], valley: [] as string[], manual: [] as string[] }
+	for (const u of [...g.weather, ...g.missions]) {
+		const i = g.inst[u]
+		if (!i) continue
+		const c = card(i.id)
+		const text = ((i.side === 'B' && c.B ? c.B.text : c.text) ?? '').replace(/<[^>]+>/g, '')
+		const pda = text.match(/Path Deck Assembly:?\s*([^\n]+)/i)?.[1]?.trim()
+		if (!pda) continue
+		let t = pda
+		let m: RegExpMatchArray | null
+		let ok = true
+		if ((m = t.match(/^If you are (not )?arriving at (?!a non-pivotal)([\w' ]+?), (.+)$/i))) {
+			ok = (loc.name.toLowerCase() === m[2].toLowerCase()) !== !!m[1]
+			t = m[3]
+		} else if ((m = t.match(/^(?:If you are arriving at a non-pivotal location|At any non-pivotal location), (.+)$/i))) {
+			ok = !loc.pivotal
+			t = m[1]
+		} else if ((m = t.match(/^If your current terrain is (\w+), (.+)$/i))) {
+			ok = terrain === m[1].toLowerCase()
+			t = m[2]
+		} else if (/^(If|Based on)\b/i.test(t)) {
+			out.manual.push(`${c.name}: ${pda}`)
+			continue
+		}
+		if (!ok) continue
+		t = t.replace(/\.$/, '')
+		if ((m = t.match(/^use the (\w[\w-]*) terrain set$/i))) out.terrain = m[1].toLowerCase().replace(/-/g, '_')
+		else if ((m = t.match(/^search the ([\w' -]+?) set for (.+?) and shuffle them into the Valley set before adding those cards to the path deck$/i)))
+			for (const [nm, n] of itemList(m[2])) out.valley.push(...pathCardsNamed(g, m[1], nm, n))
+		else if ((m = t.match(/^search the ([\w' -]+?) set for (.+?),? and shuffle (?:it|them) into the path deck$/i)))
+			for (const [nm, n] of itemList(m[2])) out.cards.push(...pathCardsNamed(g, m[1], nm, n))
+		else if ((m = t.match(/^(?:add|shuffle) (.+?) (?:to|into) the path deck$/i))) for (const [nm, n] of itemList(m[1])) out.cards.push(...pathCardsNamed(g, null, nm, n))
+		else out.manual.push(`${c.name}: ${pda}`)
+	}
+	return out
+}
 export function buildPathDeck(g: Game, locId: string, terrain: string) {
 	const loc = card(locId)
 	const pda = loc.pda ?? ''
 	let m: RegExpMatchArray | null
-	const t2 = (m = pda.match(/Use the (\w[\w-]*) terrain/i)) ? m[1].toLowerCase().replace(/-/g, '_') : terrain
+	const other = otherAssembly(g, loc, terrain)
+	const t2 = (m = pda.match(/Use the (\w[\w-]*) terrain/i)) ? m[1].toLowerCase().replace(/-/g, '_') : (other.terrain ?? terrain)
 	const terrainSet = TERRAINS[t2]
 	const cards: string[] = terrainSet ? setAll(g, terrainSet) : []
 	const notes: string[] = []
@@ -2341,7 +2453,7 @@ export function buildPathDeck(g: Game, locId: string, terrain: string) {
 			notes.push(`${m[2]} deck`)
 		} else cards.push(...own)
 	} else if (!/Do not add cards from the Valley set/i.test(pda)) {
-		const valley = shuffle(setAll(g, 'The Valley'), g.rng)
+		const valley = shuffle([...setAll(g, 'The Valley'), ...other.valley], g.rng)
 		const must = pda.match(/1 of the 3 cards added from the Valley set must be ([\w' -]+?)\./i)?.[1]
 		const forced = must ? valley.find((id) => card(id).name.toLowerCase() === must.toLowerCase()) : undefined
 		const pick = forced ? [forced, ...valley.filter((id) => id !== forced).slice(0, 2)] : valley.slice(0, 3)
@@ -2380,6 +2492,8 @@ export function buildPathDeck(g: Game, locId: string, terrain: string) {
 		g.decks[m[2]] = shuffle(sets.flatMap((x) => setAll(g, x)), g.rng)
 		notes.push(`${m[2]} deck`)
 	}
+	cards.push(...other.cards)
+	for (const t of other.manual) g.queue.push({ kind: 'manual', title: 'Path deck assembly', text: t, ranger: g.lead })
 	if (pda && /effigies/i.test(pda)) g.queue.push({ kind: 'manual', title: loc.name, text: `Path deck assembly: ${pda} Attach any effigies you have recorded with the card tools.`, ranger: g.lead })
 	g.pathDeck = shuffle(cards, g.rng)
 	g.pathDiscard = []
@@ -2471,6 +2585,22 @@ function refresh(g: Game) {
 		for (const a of ASPECTS) R.energy[a] = R.aspects[a]
 	}
 	if (g.ended) return
+	for (const R of g.rangers) {
+		if (R.spiritspeak) log(g, `${R.name} stops spiritspeaking.`)
+		R.spiritspeak = false
+		R.spiritOnce = false
+	}
+	for (const u of [...g.weather, g.location, ...g.missions, ...inPlay(g).filter((i) => i.zone !== 'surroundings').map((i) => i.uid)]) {
+		if (!g.inst[u]) continue
+		const rf = P(g, u).refresh
+		if (rf) addJob(g, { title: `${nameOf(g, u)} (refresh)`, eff: rf, src: u, ranger: g.lead })
+	}
+	// Rulebook, Phase 4: resolve Refresh effects, then ready all cards in play.
+	addJob(g, SYS('readyAll', g.lead))
+	addJob(g, SYS('newRound', g.lead))
+}
+function readyAll(g: Game) {
+	log(g, 'Every card in play readies.')
 	for (const i of Object.values(g.inst)) {
 		if (i.attachedTo != null && /attached to this \w+ do not ready/i.test(card(g.inst[i.attachedTo]?.id ?? i.id).text || '')) continue
 		if (i.exhausted && /This gear does not ready during the refresh phase/i.test(flat(i.id))) continue
@@ -2488,17 +2618,6 @@ function refresh(g: Game) {
 		}
 		i.exhausted = false
 	}
-	for (const R of g.rangers) {
-		if (R.spiritspeak) log(g, `${R.name} stops spiritspeaking.`)
-		R.spiritspeak = false
-		R.spiritOnce = false
-	}
-	for (const u of [...g.weather, g.location, ...g.missions, ...inPlay(g).filter((i) => i.zone !== 'surroundings').map((i) => i.uid)]) {
-		if (!g.inst[u]) continue
-		const rf = P(g, u).refresh
-		if (rf) addJob(g, { title: `${nameOf(g, u)} (refresh)`, eff: rf, src: u, ranger: g.lead })
-	}
-	addJob(g, SYS('newRound', g.lead))
 }
 function newRound(g: Game) {
 	if (g.ended) return
@@ -2511,9 +2630,11 @@ function newRound(g: Game) {
 	g.extraPath = 0
 	const draws = [...g.rangers.map((_, k) => (g.lead + k) % nRangers(g)), ...Array<number>(extra).fill(g.lead)]
 	for (let k = 0; k < draws.length && !g.ended; k++) {
+		const q0 = g.queue.length
+		const j0 = g.jobs.length
 		drawPathCard(g, draws[k])
-		// a path moment is resolved before the next card is drawn
-		if (g.moment != null) {
+		// Rulebook, Phase 1: fully resolve each card (guide entry, "enters play", a path moment) before drawing the next.
+		if (g.moment != null || g.queue.length > q0 || g.jobs.length > j0) {
 			for (const d of draws.slice(k + 1)) addJob(g, SYS('drawPath', d))
 			break
 		}
@@ -2554,6 +2675,8 @@ export interface DaySetup {
 	lead?: number
 	/** Expansions in play (pack codes): their path cards join the Valley, General and terrain sets. */
 	packs?: string[]
+	/** Campaign guide entries above today on the tracker (read in step 6 of setup). */
+	entries?: string[]
 }
 export function newDay(s: DaySetup): Game {
 	const g: Game = {
@@ -2619,6 +2742,8 @@ export function newDay(s: DaySetup): Game {
 	g.weather = [addInst(g, s.weather, 'surroundings', null, 'weather', s.weatherSide ?? 'A')]
 	for (const m of s.missions) g.missions.push(addInst(g, m.id, 'surroundings', null, 'mission', m.side ?? 'A'))
 	log(g, `Day ${s.day} begins at ${card(s.location).name}. Weather: ${card(s.weather).name}.`)
+	// Rulebook, Setup step 6: read the entries listed above the current day
+	for (const e of s.entries ?? []) g.queue.push({ kind: 'guide', entry: e, why: `Listed above day ${s.day} on the campaign tracker` })
 	buildPathDeck(g, s.location, s.terrain)
 	g.rangers.forEach((_, r) => g.queue.push({ kind: 'mulligan', ranger: r }))
 	return g

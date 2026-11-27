@@ -62,6 +62,10 @@ export interface Campaign {
 	expansions?: string[]
 	/** The weather for the next day was picked by hand instead of from the tracker. */
 	weatherManual?: boolean
+	/** Rulebook, Customizing Difficulty with Weather: 'tracker' (recommended) or one weather card every day. */
+	weatherMode?: string
+	/** Campaign guide entries written above days on the tracker (by the guide's instructions). */
+	dayEntries?: Record<number, string[]>
 }
 
 export const LINGERING_INJURY = '01240'
@@ -92,6 +96,22 @@ export const WEATHER_SCHEDULE: [from: number, to: number, weather: string][] = [
 ]
 export function weatherForDay(day: number): string {
 	return WEATHER_SCHEDULE.find(([a, b]) => day >= a && day <= b)?.[2] ?? '01373'
+}
+/** Difficulty choices for the weather (rulebook): the tracker, or always one card. */
+export const WEATHER_MODES: { id: string; label: string }[] = [
+	{ id: 'tracker', label: 'Follow the campaign tracker (recommended)' },
+	{ id: '01373', label: 'Easy: always A Perfect Day' },
+	{ id: '01374', label: 'Normal: always Downpour' },
+	{ id: '01375', label: 'Hard: always Howling Winds' },
+	{ id: '01376', label: 'Expert: always Electric Fog' },
+]
+export const dailyWeather = (c: Pick<Campaign, 'weatherMode'>, day: number) => (c.weatherMode && c.weatherMode !== 'tracker' ? c.weatherMode : weatherForDay(day))
+/** Campaign guide entries printed above days on the tracker (core box, and the expansions' starting entries). */
+const TRACKER_ENTRIES: Record<string, Record<number, string[]>> = { Core: { 3: ['94.1'], 4: ['1.04'] }, SiB: { 8: ['216.1'] }, SoS: { 24: ['246.1'] } }
+/** Entries to read above this day (step 6 of setup): printed ones plus any the guide had you write in. */
+export function entriesForDay(c: Pick<Campaign, 'expansions' | 'dayEntries'>, day: number): string[] {
+	const printed = ['Core', ...(c.expansions ?? [])].flatMap((p) => TRACKER_ENTRIES[p]?.[day] ?? [])
+	return [...new Set([...printed, ...(c.dayEntries?.[day] ?? [])])]
 }
 
 /** Weather cards to choose from: the core four plus any expansion weather. */
@@ -160,7 +180,7 @@ export function finishDay(c: Campaign, g: Game): Campaign {
 	n.history.push({ day: n.day, summary: `${g.ended?.reason ?? 'Day ended.'} (${card(n.location).name})` })
 	n.day += 1
 	// the next day's weather comes from the campaign tracker
-	n.weather = weatherForDay(n.day)
+	n.weather = dailyWeather(n, n.day)
 	n.weatherSide = 'A'
 	n.weatherManual = false
 	// Mission cards flipped during play keep their side.
