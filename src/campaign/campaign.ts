@@ -58,17 +58,41 @@ export interface Campaign {
 	aspirations?: Aspiration[]
 	/** Guide this campaign's setup and first day step by step. */
 	guided?: boolean
-	/** Expansions mixed into the Valley (pack codes: SiB, SoS). */
+	/** Expansions mixed into the Valley (pack codes: SiB, SoS, MoP, MoV). */
 	expansions?: string[]
+	/** The weather for the next day was picked by hand instead of from the tracker. */
+	weatherManual?: boolean
 }
 
 export const LINGERING_INJURY = '01240'
 export const WEATHER: { id: string; label: string }[] = [
-	{ id: '01373', label: 'A Perfect Day (easy)' },
-	{ id: '01374', label: 'Downpour (normal)' },
-	{ id: '01375', label: 'Howling Winds (hard)' },
-	{ id: '01376', label: 'Electric Fog (expert)' },
+	{ id: '01373', label: 'A Perfect Day' },
+	{ id: '01374', label: 'Downpour' },
+	{ id: '01375', label: 'Howling Winds' },
+	{ id: '01376', label: 'Electric Fog' },
 ]
+/** The weather printed on the Lure of the Valley campaign tracker, by day (days 31–45: the extended tracker). */
+export const WEATHER_SCHEDULE: [from: number, to: number, weather: string][] = [
+	[1, 3, '01373'],
+	[4, 7, '01374'],
+	[8, 9, '01373'],
+	[10, 12, '01374'],
+	[13, 14, '01375'],
+	[15, 17, '01374'],
+	[18, 20, '01375'],
+	[21, 22, '01373'],
+	[23, 25, '01374'],
+	[26, 28, '01375'],
+	[29, 30, '01373'],
+	[31, 33, '01374'],
+	[34, 35, '01373'],
+	[36, 39, '01375'],
+	[40, 42, '01374'],
+	[43, 45, '01373'],
+]
+export function weatherForDay(day: number): string {
+	return WEATHER_SCHEDULE.find(([a, b]) => day >= a && day <= b)?.[2] ?? '01373'
+}
 
 /** Weather cards to choose from: the core four plus any expansion weather. */
 export function weatherOptions(c: Pick<Campaign, 'expansions'>): { id: string; label: string }[] {
@@ -85,7 +109,7 @@ export function newCampaign(name: string, rangers: CampaignRanger[], expansions:
 		day: 1,
 		location: LOCATION_START,
 		terrain: 'woods',
-		weather: '01373',
+		weather: weatherForDay(1),
 		weatherSide: 'A',
 		missions: [],
 		rewards: [],
@@ -135,6 +159,10 @@ export function finishDay(c: Campaign, g: Game): Campaign {
 	// Lingering Injury removed during the day ("return this card to your collection")
 	n.history.push({ day: n.day, summary: `${g.ended?.reason ?? 'Day ended.'} (${card(n.location).name})` })
 	n.day += 1
+	// the next day's weather comes from the campaign tracker
+	n.weather = weatherForDay(n.day)
+	n.weatherSide = 'A'
+	n.weatherManual = false
 	// Mission cards flipped during play keep their side.
 	for (const u of g.missions) {
 		const i = g.inst[u]

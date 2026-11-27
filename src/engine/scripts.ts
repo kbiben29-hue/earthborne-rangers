@@ -231,3 +231,47 @@ export function scriptFor(id: string, side: 'A' | 'B', p: Parsed) {
 		p.arrival = [{ who: 'lead', effect: eff }]
 	}
 }
+
+/**
+ * Path moments (Moments on the Path / in the Valley) reworded so the engine can run them (same meaning).
+ * Keyed by card id; [per_ranger] values are filled in for the number of Rangers. Lines the engine
+ * still can't run are shown to the players to do by hand.
+ */
+export const MOMENT_TEXT: Record<string, string> = {
+	// The Valley's Splendor ("a Ranger may soothe 1 fatigue" per progress: the Ranger who drew it soothes them)
+	'03381': '<b>RANGERS CHOOSE:</b>\n<c>A) Enjoy the view from the overlook.</c> Discard 2[per_ranger] [progress] from the location. Soothe an equal amount of fatigue.\n<c>B) Press forward.</c> Add [per_ranger][progress] to the location. Each Ranger exhausts their role or suffers 2 fatigue.',
+	// Wind and Wear
+	'03382': '<b>YOU CHOOSE:</b>\n<c>A) Pause to perform some maintenance.</c>\n<b>[FOC] + [reason]: Repair [2]</b> add 1 token to one of your equipped tech for every 2 effort. If you fail, discard a gear from your hand or discard one of your equipped gear.\n<c>B) It\'ll be fine.</c> Discard a gear from your hand or discard 3 tokens from one of your equipped gear.',
+	// A Cold Wind
+	'03383': 'If the weather is not inclement, each Ranger soothes 1 fatigue.\nIf the weather is inclement, add 2 tokens to the weather, then resolve the following:\n<b>RANGERS CHOOSE:</b>\n<c>A) Build a fire.</c> Search the General set for Campfire Remains and put it into play.\n<c>B) Continue undaunted.</c> Each Ranger suffers 2 fatigue.',
+	// Lightning Strike!
+	'03384': 'Add 3[harm] to the path card with the highest presence.\nAdd 1[harm] to each other card in its area. If it was within reach of a Ranger, that Ranger suffers 1 injury.\nIf the weather is not inclement, continue reading:\nPerform a <b>group test</b>:\n<b>[FOC] + [exploration]: Chart [2[per_ranger]]</b> discard [per_ranger] tokens from the weather. If you fail, return the current weather to the collection and put Electric Fog into play.',
+	// A Pack Without an Owner ("succeed by 3[per_ranger] or more" = effort of 5[per_ranger] or more)
+	'03385': '<b>RANGERS CHOOSE:</b>\n<c>A) Search for the owner of the pack.</c> Perform a <b>group test</b>:\n<b>[AWA] + [exploration]: Locate [2[per_ranger]]</b> If the group\'s effort is 5[per_ranger] or more, put a random human from the Valley set into play. If the group\'s effort is less than 5[per_ranger], search the Valley set for a human and shuffle it into the path deck.\n<c>B) No need to bother them.</c> Search the path deck for the next human and discard them.',
+	// Rumbling Beneath Your Feet
+	'03387': 'Draw a challenge card and resolve the corresponding effect:\n[sun] Search the Valley set for the Arcology Sinkhole and put it into play.\n[mountain] Move each feature along the way within reach, treating them as having Ambush.\n[crest] Search the Swamp set for a Hydraworm and shuffle it into the path deck.',
+	// A Little Lost
+	'03388': '<b>If you see this card while scouting:</b> You may discard it to scout 2 additional cards.\n<b>RANGERS CHOOSE:</b>\n<c>A) Backtrack.</c> Shuffle the path discard into the path deck. If [per_ranger] or fewer cards were added to the path deck this way, each Ranger suffers 1 fatigue.\n<c>B) Continue on your present course.</c> Attach this moment to the location. Increase its presence by 1.',
+	// Sounds from Below
+	'03394': 'Draw a challenge card and resolve the corresponding effect. You may draw additional challenge cards until you choose to stop.\n[sun] Add 1[harm] to each feature.\n[mountain] Exhaust a being.\n[crest] Discard 1 [AWA] energy or suffer 1 injury.',
+	// Ranger Report
+	'03395': 'Perform a <b>group test</b>:\n<b>[FOC] + [exploration]: Locate [2[per_ranger]]</b> add [per_ranger] tokens to the weather or discard [per_ranger] tokens from the weather. If you fail, search the path deck for the next human and discard them.',
+	// Washed Out!
+	'03396': 'If you are using River terrain, search the path deck and discard for the next water feature and put it into play.\nIf you are not using River terrain, then resolve the following:\n<b>RANGERS CHOOSE:</b>\n<c>A) Ford the River.</c> Randomly add [per_ranger] cards from the River set to the top of the path deck.\n<c>B) Move to higher ground.</c> Attach this moment to a feature. Increase its [progress] threshold by 2[per_ranger].',
+	// A Chance Encounter
+	'04042': 'Put a random human from the Valley set into play. Then, draw a challenge card and resolve the corresponding effect:\n[sun] Add 1[progress] to them.\n[mountain] Exhaust them. Exhaust another human.\n[crest] Add 1[harm] to them.',
+	// Tempting Melody ("among the Rangers": the Ranger who drew it soothes them)
+	'04044': '<b>RANGERS CHOOSE:</b>\n<c>A) Stay awhile and listen.</c> Each Ranger suffers 1 fatigue. Then, perform a <b>group test</b>:\n<b>[SPI] + [connection]: Listen [1[per_ranger]]</b> soothe fatigue equal to your effort.\n<c>B) We\'ll meet again.</c> Discard all [progress] from each human within reach. Move each human within reach along the way.',
+	// Ominous Skies
+	'04045': 'If the weather is neither inclement nor hot, flip the weather.\n<b>RANGERS CHOOSE:</b>\n<c>A) Take shelter.</c> Discard [per_ranger][progress] from the location. Add an equal amount of [progress] to a human.\n<c>B) Press forward.</c> Add [per_ranger][progress] to the location. Resolve each challenge effect on the weather in an order of your choice.',
+	// Breath of the Verdessa
+	'04046': 'If the weather is Wild Growth or Pollen Clouds, add 2 tokens to the weather.\nIf the weather is not Wild Growth or Pollen Clouds, return the weather to the collection and put Wild Growth into play with 2 pollen on it.',
+	// Going in Circles (the empty-discard line first, so the other can't empty it before it's checked)
+	'04049': 'If the path discard has no cards, shuffle this card into the top 4 cards of the path deck.\nIf the path discard has 1 or more cards, shuffle the path discard onto the top of the path deck.',
+	// Slippery Slope
+	'04050': '<b>If you see this card while scouting:</b> You may discard it.\n<b>[FIT] + [reason]: Regain [2]</b> If you fail, suffer 1 injury and move each card within reach to along the way.',
+	// Weather Machinery
+	'04051': '<b>RANGERS CHOOSE:</b>\n<c>A) Try to fix the device.</c> Perform a <b>group test</b>:\n<b>[FOC] + [reason]: Repair [2[per_ranger]]</b> add 2 tokens to the weather or discard 2 tokens from the weather. Flip the weather or do nothing. If you fail, each Ranger suffers 1 fatigue.\n<c>B) Let it be.</c> Search the Nimbus set for a Deep Fog and put it into play.',
+	// Frigid Winds
+	'04053': 'If the weather is Blizzard, discard all tokens from the weather.\nIf the weather is Pristine Snow, discard 2 tokens from the weather and flip the weather.\nIf the weather is not cold, return the weather to the collection and put Blizzard into play.',
+}

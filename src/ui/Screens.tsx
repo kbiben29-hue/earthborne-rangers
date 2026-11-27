@@ -21,6 +21,7 @@ import {
 	roles,
 	SPECIALTIES,
 	weatherOptions,
+	weatherForDay,
 	type Build,
 	type Campaign,
 	type CampaignRanger,
@@ -152,13 +153,15 @@ export function NewCampaign({ done, cancel, guideFirst = false }: { done: (name:
 				<input value={name} onChange={(e) => setName(e.target.value)} />
 			</label>
 			<div className="panel" data-guide="expansions">
-				<h4>Expansions in the Valley</h4>
+				<h4>Expansions</h4>
 				{PATH_PACKS.map((p) => (
 					<label className="check" key={p.code}>
 						<input type="checkbox" checked={exp.includes(p.code)} onChange={(e) => setExp(e.target.checked ? [...exp, p.code] : exp.filter((x) => x !== p.code))} /> {p.name}
 					</label>
 				))}
-				<p className="sub">Their locations, path cards, missions and weather join the Lure of the Valley campaign. You can change this later on the campaign page.</p>
+				<p className="sub">
+					Spire in Bloom and Shadow of the Storm add their locations, path cards, missions and weather to Lure of the Valley. Moments on the Path and Moments in the Valley shuffle one path moment per Ranger into the path deck at every location. You can change this later on the campaign page.
+				</p>
 			</div>
 			<h3 data-guide="rangers">Rangers ({rangers.length}/4)</h3>
 			<ul className="rangers-list">
@@ -349,6 +352,8 @@ export function Builder({ done, cancel }: { done: (r: CampaignRanger) => void; c
 
 // ------------------------------------------------------------------ campaign tracker
 
+const WEATHER_GLYPH: Record<string, string> = { '01373': '☀', '01374': '☂', '01375': '≋' }
+
 export function CampaignView({ c, update, startDay, resume, back }: { c: Campaign; update: (c: Campaign) => void; startDay: (c: Campaign) => void; resume: () => void; back: () => void }) {
 	const [ev, setEv] = useState('')
 	const [mission, setMission] = useState('')
@@ -385,7 +390,7 @@ export function CampaignView({ c, update, startDay, resume, back }: { c: Campaig
 		},
 		{ title: 'Where you are', body: 'Your Rangers start the campaign at Lone Tree Station, the Rangers’ home. After each day the game remembers where you ended up and fills this in.', target: '[data-guide="location"]', next: true },
 		{ title: 'The terrain', body: 'The kind of path you took to get here (woods, grassland…). It decides which wild cards you meet. For day 1 leave it as it is.', target: '[data-guide="terrain"]', next: true },
-		{ title: 'The weather', body: 'The printed campaign tracker in your box lists the weather for each day. Day 1 is A Perfect Day, already chosen.', target: '[data-guide="weather"]', next: true },
+		{ title: 'The weather', body: 'The printed campaign tracker in your box lists the weather for each day (the little symbols under the day numbers). The game picks it for you each day; change it here only if a card or the guide says so.', target: '[data-guide="weather"]', next: true },
 		{ title: 'The lead Ranger', body: 'The lead Ranger takes the first turn each round and follows any card text that says “Lead Ranger”. With one Ranger, that is you.', target: '[data-guide="lead"]', next: true },
 		{ title: 'Ready!', body: 'Tap “Start day 1”. The game shuffles and deals everything. On day 1 a coach will suggest good moves while you play (turn it off with the 🎓 button).', target: '[data-guide="start"]', todo: 'Tap “Start day 1”' },
 	]
@@ -414,13 +419,17 @@ export function CampaignView({ c, update, startDay, resume, back }: { c: Campaig
 			</div>
 			<div className="tracker" data-guide="days">
 				<div className="days">
-					{Array.from({ length: 30 }, (_, k) => (
-						<span key={k} className={`day ${k + 1 < c.day ? 'past' : k + 1 === c.day ? 'now' : ''}`}>
-							{k + 1}
-						</span>
-					))}
+					{Array.from({ length: c.day > 30 ? 45 : 30 }, (_, k) => {
+						const w = weatherForDay(k + 1)
+						return (
+							<span key={k} className={`day ${k + 1 < c.day ? 'past' : k + 1 === c.day ? 'now' : ''}`} title={`Day ${k + 1}: ${card(w).name}`}>
+								{k + 1}
+								<i className="wx">{WEATHER_GLYPH[w] ?? ''}</i>
+							</span>
+						)
+					})}
 				</div>
-				{c.day > 30 && <p className="warn">Day 30 has passed: the campaign guide tells you what happens now.</p>}
+				{c.day > 30 && <p className="warn">The tracker’s 30 days are over. If your story isn’t finished, you can keep going: days 31–45 follow the extended tracker’s weather.</p>}
 			</div>
 
 			{inProgress ? (
@@ -464,8 +473,8 @@ export function CampaignView({ c, update, startDay, resume, back }: { c: Campaig
 						</select>
 					</label>
 					<label className="field" data-guide="weather">
-						Weather (as listed under day {c.day} on your tracker)
-						<select value={c.weather} onChange={(e) => set({ weather: e.target.value })}>
+						Weather <small>(the tracker says {card(weatherForDay(c.day)).name} for day {c.day})</small>
+						<select value={c.weather} onChange={(e) => set({ weather: e.target.value, weatherManual: e.target.value !== weatherForDay(c.day) })}>
 							{weatherOptions(c).map((w) => (
 								<option key={w.id} value={w.id}>
 									{w.label}
@@ -474,7 +483,7 @@ export function CampaignView({ c, update, startDay, resume, back }: { c: Campaig
 						</select>
 					</label>
 					<div className="field">
-						Expansions in the Valley
+						Expansions
 						{PATH_PACKS.map((p) => (
 							<label className="check" key={p.code}>
 								<input

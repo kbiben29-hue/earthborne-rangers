@@ -5,9 +5,9 @@
 import { ASPECTS, card, CARDS, CHALLENGE, setCards, TERRAINS, type Aspect, type CardDef } from '../data/data'
 import type { Amount, Cond, Effect, Filter, Ref, Step } from './dsl'
 import { effect as effectOf } from './dsl'
-import { shuffle } from './rng'
-import { scriptFor } from './scripts'
-import { COMMON_TESTS, parse, SPIRIT_TESTS, type Ability, type Parsed, type Sym } from './text'
+import { pick, shuffle } from './rng'
+import { MOMENT_TEXT, scriptFor } from './scripts'
+import { COMMON_TESTS, parse, parseMoment, SPIRIT_TESTS, type Ability, type Parsed, type Sym, type TestDef } from './text'
 import { readTiming, type Ev, type On } from './triggers'
 import type { Game, Inst, Intent, Job, ManualOp, Ranger } from './types'
 
@@ -17,18 +17,24 @@ function flat(id: string) {
 	return (card(id).text || '').replace(/<f>[\s\S]*?<\/f>/g, '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ')
 }
 const parsedCache = new Map<string, Parsed>()
-export function parsedOf(id: string, side: 'A' | 'B' = 'A'): Parsed {
-	const k = id + side
+/** Moments on the Path / in the Valley: a moment card shuffled into the path deck. */
+export const isPathMoment = (id: string) => {
+	const c = CARDS[id]
+	return !!c && c.type === 'Moment' && c.back === 'path'
+}
+export function parsedOf(id: string, side: 'A' | 'B' = 'A', rangers = 1): Parsed {
+	const pm = isPathMoment(id)
+	const k = id + side + (pm ? `/${rangers}` : '')
 	let p = parsedCache.get(k)
 	if (!p) {
 		const c = card(id)
-		p = parse(side === 'B' && c.B ? c.B.text : c.text)
+		p = pm ? parseMoment(MOMENT_TEXT[id] ?? c.text ?? '', rangers) : parse(side === 'B' && c.B ? c.B.text : c.text)
 		scriptFor(id, side, p)
 		parsedCache.set(k, p)
 	}
 	return p
 }
-export const P = (g: Game, uid: number) => parsedOf(g.inst[uid].id, g.inst[uid].side)
+export const P = (g: Game, uid: number) => parsedOf(g.inst[uid].id, g.inst[uid].side, g.rangers.length)
 export const def = (g: Game, uid: number): CardDef => card(g.inst[uid].id)
 export function nameOf(g: Game, uid: number): string {
 	const i = g.inst[uid]
@@ -67,7 +73,12 @@ export function presence(g: Game, uid: number): number {
 	const p = i.side === 'B' && c.B?.presence != null ? c.B.presence : c.presence
 	let n = typeof p === 'number' ? p : p === 'X' && /number of \[harm\]/.test(c.text || '') ? i.harm : 0
 	// Surveyed Land: "Reduce the attached feature's presence by 1 for each marker"
-	for (const a of attachments(g, uid)) if (/Reduce the attached \w+'s presence by 1 for each/i.test(flat(a.id))) n -= a.tokens
+	for (const a of attachments(g, uid)) {
+		if (/Reduce the attached \w+'s presence by 1 for each/i.test(flat(a.id))) n -= a.tokens
+		// A Little Lost: "Attach this moment to the location. Increase its presence by 1."
+		const up = isPathMoment(a.id) && flat(a.id).match(/Attach this moment to [\w ]+?\. Increase its presence by (\d+)/i)
+		if (up) n += Number(up[1])
+	}
 	return Math.max(0, n)
 }
 export function keywords(g: Game, uid: number): string[] {
@@ -88,7 +99,14 @@ export function threshold(g: Game, uid: number, what: 'prog' | 'harm'): number |
 	if (!t) return null
 	if (t.ranger) return 'ranger'
 	if (t.n == null) return null
-	return t.per ? t.n * nRangers(g) : t.n
+	let n = t.per ? t.n * nRangers(g) : t.n
+	// Washed Out!: "Attach this moment to a feature … Increase its [progress] threshold by 2[per_ranger]."
+	if (what === 'prog')
+		for (const a of attachments(g, uid)) {
+			const up = isPathMoment(a.id) && flat(a.id).match(/Increase its \[progress\] threshold by (\d+)(\[per_ranger\])?/i)
+			if (up) n += Number(up[1]) * (up[2] ? nRangers(g) : 1)
+		}
+	return n
 }
 
 // ---------------------------------------------------------------- state helpers
@@ -244,6 +262,16 @@ function drawPathCard(g: Game, r: number, why = 'draws') {
 }
 export function putPathInPlay(g: Game, id: string, r: number, why = 'draws', area?: 'reach' | 'along'): number {
 	const c = card(id)
+	// Rulebook, Path Moments: they don't enter play; the Ranger who drew it resolves its text, then discards it.
+	if (isPathMoment(id)) {
+		const uid = addInst(g, id, 'surroundings', null, 'path')
+		log(g, `${rangerName(g, r)} ${why.replace(/:$/, '')} a path moment: ${c.name}.`)
+		g.moment = uid
+		const p = P(g, uid)
+		if (p.moment) addJob(g, { title: c.name, eff: p.moment, src: uid, ranger: r })
+		addJob(g, SYS('momentDone', r, { target: uid }))
+		return uid
+	}
 	const zone = area ?? c.area ?? 'along'
 	const uid = addInst(g, id, zone === 'reach' ? 'reach' : 'along', zone === 'reach' ? r : null, 'path')
 	log(g, `${rangerName(g, r)} ${why} ${c.name} (${zone === 'reach' ? 'within reach' : 'along the way'}).`)
@@ -342,6 +370,10 @@ export function matches(g: Game, uid: number, f: Filter, job: Pick<Job, 'src' | 
 	if (f.harm && i.harm < f.harm) return false
 	if (f.path && i.kind !== 'path') return false
 	if (f.attachedToSelf && (job?.src == null || i.attachedTo !== job.src)) return false
+	if (f.maxPresence != null && presence(g, uid) > f.maxPresence) return false
+	if (f.mine && (i.zone !== 'player' || i.owner !== job?.ranger)) return false
+	// path moments don't enter play (unless one stays in the surroundings or attached)
+	if (i.kind === 'path' && !i.kept && i.attachedTo == null && isPathMoment(i.id)) return false
 	return true
 }
 function candidates(g: Game, f: Filter, job: Job): number[] {
@@ -377,6 +409,7 @@ function amount(g: Game, a: Amount, job: Job, to?: number): number {
 	if ('all' in a) return to != null && g.inst[to] ? 999 : 0
 	if ('same' in a) return job.lastAmt ?? 0
 	if ('count' in a) return candidates(g, a.count, job).length * a.mult
+	if ('sumPresence' in a) return candidates(g, a.sumPresence, job).reduce((n, u) => n + presence(g, u), 0)
 	if ('spirits' in a) return inPlay(g).filter((i) => isSpirit(g, i.uid) && (a.spirits === 'along' ? i.zone === 'along' : i.zone === 'reach' && i.owner === (to ?? job.ranger))).length + a.plus
 	return 0
 }
@@ -523,8 +556,24 @@ function evalCond(g: Game, c: Cond, job: Job): boolean | null {
 			return (g.phase === 'turns') !== !!c.negate
 		case 'spiritspeaking':
 			return !!g.rangers[job.ranger].spiritspeak !== !!c.negate
+		case 'weather': {
+			const w = g.weather.map((u) => g.inst[u]).find(Boolean)
+			if (!w) return !!c.negate
+			let ok = true
+			if (c.trait) ok = traitsOf(g, w.uid).some((t) => t.toLowerCase().replace(/s$/, '') === c.trait!.replace(/s$/, ''))
+			if (c.names) ok = c.names.some((n) => nameOf(g, w.uid).toLowerCase().replace(/s$/, '') === n.toLowerCase().replace(/s$/, ''))
+			return c.negate ? !ok : ok
+		}
 		case 'failedTest':
 			return g.lastTest?.success === false
+		case 'effortAtLeast':
+			return c.below ? job.effort < c.n : job.effort >= c.n
+		case 'lastAmt':
+			return (job.lastAmt ?? 0) <= c.max
+		case 'terrain':
+			return (g.terrain === c.name) !== !!c.negate
+		case 'pathDiscard':
+			return (c.min == null || g.pathDiscard.length >= c.min) && (c.max == null || g.pathDiscard.length <= c.max)
 		case 'not': {
 			const v = evalCond(g, c.x, job)
 			return v === null ? null : !v
@@ -582,6 +631,7 @@ function runStep(g: Game, s: Step & { when?: Cond }, job: Job, key: string): 'ok
 					if (i[s.what] < want && 'n' in s.amt) job.failed = true
 					const n = Math.min(i[s.what], want)
 					i[s.what] -= n
+					job.lastAmt = n
 					if (n) log(g, `${n} ${s.what === 'tokens' ? (card(i.id).tokens?.name ?? 'token').toLowerCase() : s.what} removed from ${nameOf(g, u)}.`)
 				},
 				'a card',
@@ -746,7 +796,7 @@ function runStep(g: Game, s: Step & { when?: Cond }, job: Job, key: string): 'ok
 		}
 		case 'searchSet': {
 			const set = s.set.replace(/^the /i, '')
-			const pool = setAll(g, set)
+			const pool = s.random ? shuffle(setAll(g, set), g.rng) : setAll(g, set)
 			const inUse = new Set([...g.pathDeck, ...g.pathDiscard, ...Object.values(g.inst).map((i) => i.id)])
 			for (let k = 0; k < (s.n ?? 1); k++) {
 				const id = pool.find((x) => fakeMatch(x, s.f) && !inUse.has(x)) ?? pool.find((x) => fakeMatch(x, s.f))
@@ -758,7 +808,10 @@ function runStep(g: Game, s: Step & { when?: Cond }, job: Job, key: string): 'ok
 				if (s.then === 'shuffle') {
 					g.pathDeck = shuffle([...g.pathDeck, id], g.rng)
 					log(g, `${card(id).name} is shuffled into the path deck.`)
-				} else putPathInPlay(g, id, r, 'finds')
+				} else {
+					const u = putPathInPlay(g, id, r, 'finds')
+					job.that = [u]
+				}
 			}
 			return 'ok'
 		}
@@ -837,6 +890,123 @@ function runStep(g: Game, s: Step & { when?: Cond }, job: Job, key: string): 'ok
 				const steps = s[sym]
 				// run the branch as its own effect right after this one
 				g.jobs.splice(1, 0, { ...job, title: `${job.title} (${sym})`, eff: { text: '', pre: [], steps, auto: true }, stage: 'pre', i: 0, picks: {} })
+			}
+			return 'ok'
+		}
+		case 'eachRanger': {
+			const order = g.rangers.map((_, k) => (r + k) % nRangers(g))
+			g.jobs.splice(1, 0, ...order.map((k) => ({ ...job, ranger: k, eff: { text: '', pre: [], steps: s.steps, auto: true }, stage: 'pre' as const, i: 0, picks: {} })))
+			return 'ok'
+		}
+		case 'setWeather': {
+			const w = Object.values(CARDS).find((c) => c.type === 'Weather' && (c.name.toLowerCase() === s.name.toLowerCase() || c.B?.name.toLowerCase() === s.name.toLowerCase()))
+			if (!w) {
+				log(g, `No weather card called ${s.name}.`)
+				return 'ok'
+			}
+			for (const u of g.weather) delete g.inst[u]
+			const side = w.name.toLowerCase() === s.name.toLowerCase() ? 'A' : 'B'
+			const u = addInst(g, w.id, 'surroundings', null, 'weather', side)
+			if (s.tokens != null) g.inst[u].tokens = s.tokens
+			g.weather = [u]
+			log(g, `The weather becomes ${nameOf(g, u)}.`)
+			return 'ok'
+		}
+		case 'weatherChallenges': {
+			const w = g.weather.find((u) => g.inst[u])
+			if (w == null) return 'ok'
+			const p = P(g, w)
+			const add: Job[] = []
+			for (const sym of ['sun', 'mountain', 'crest'] as Sym[]) if (p.challenge[sym]) add.push({ ...job, title: `${nameOf(g, w)} ${SYM_LABEL[sym]}`, src: w, eff: p.challenge[sym]!, stage: 'cond', i: 0, picks: {} })
+			g.jobs.splice(1, 0, ...add)
+			return 'ok'
+		}
+		case 'clearTokens':
+			for (const R of g.rangers) R.token = null
+			log(g, 'All Ranger tokens are removed from the cards in play.')
+			return 'ok'
+		case 'setToTop': {
+			const cards = shuffle(setAll(g, s.set).filter((id) => !g.pathDeck.includes(id) && !g.pathDiscard.includes(id) && !Object.values(g.inst).some((i) => i.id === id)), g.rng).slice(0, s.n)
+			g.pathDeck.unshift(...cards)
+			log(g, `${cards.length} random card${cards.length === 1 ? '' : 's'} from the ${s.set} set go on top of the path deck.`)
+			return 'ok'
+		}
+		case 'discardToTop': {
+			const n = g.pathDiscard.length
+			g.pathDeck.unshift(...shuffle(g.pathDiscard.splice(0), g.rng))
+			log(g, `The path discard (${n}) is shuffled and placed on top of the path deck.`)
+			return 'ok'
+		}
+		case 'momentIntoTop': {
+			const u = job.src
+			if (u == null || !g.inst[u]) return 'ok'
+			const id = g.inst[u].id
+			delete g.inst[u]
+			g.pathDeck.splice(pick(Math.min(s.n, g.pathDeck.length) + 1, g.rng), 0, id)
+			log(g, `${card(id).name} is shuffled into the top ${s.n} cards of the path deck.`)
+			return 'ok'
+		}
+		case 'reshufflePath': {
+			const n = g.pathDiscard.length
+			g.pathDeck = shuffle([...g.pathDeck, ...g.pathDiscard.splice(0)], g.rng)
+			job.lastAmt = n
+			log(g, `The path discard (${n} card${n === 1 ? '' : 's'}) is shuffled into the path deck.`)
+			return 'ok'
+		}
+		case 'options': {
+			if (s.each && nRangers(g) > 1) {
+				const order = g.rangers.map((_, k) => (r + k) % nRangers(g))
+				g.jobs.splice(1, 0, ...order.map((k) => ({ ...job, ranger: k, title: `${job.title}: ${rangerName(g, k)}`, eff: { text: '', pre: [], steps: [{ ...s, each: false }], auto: true }, stage: 'pre' as const, i: 0, picks: {} })))
+				return 'ok'
+			}
+			if (!job.picks[key]) {
+				job.option = undefined
+				const who = s.each === false || nRangers(g) === 1 ? `${rangerName(g, r)} chooses:` : 'Rangers choose:'
+				g.queue.unshift({ kind: 'ask', title: job.title, text: who, ranger: r, yes: s.opts[0]?.label, no: s.opts[1]?.label, options: s.opts.map((o) => o.label) })
+				job.picks[key] = [-1]
+				return 'wait'
+			}
+			const pick = job.option ?? (job.asked === false ? 1 : 0)
+			job.option = undefined
+			job.asked = undefined
+			const o = s.opts[pick] ?? s.opts[0]
+			log(g, `${job.title}: ${o.label}`)
+			g.jobs.splice(1, 0, { ...job, eff: { text: '', pre: [], steps: o.steps, auto: true }, stage: 'pre', i: 0, picks: {} })
+			return 'ok'
+		}
+		case 'momentTest': {
+			const src = job.src
+			const td = src != null && g.inst[src] ? P(g, src).momentTests?.[s.i] : undefined
+			if (!td) return 'ok'
+			const inclement = g.weather.some((u) => g.inst[u] && traitsOf(g, u).includes('inclement'))
+			const diff = td.inclement != null && inclement ? td.inclement : td.diff === 'X' ? 1 : td.diff
+			const who = s.group ? (g.rangers[r].energy[td.aspect] > 0 ? r : g.rangers.findIndex((R) => R.energy[td.aspect] > 0)) : g.rangers[r].energy[td.aspect] > 0 ? r : -1
+			if (who < 0) {
+				log(g, `${s.group ? 'No Ranger has' : `${rangerName(g, r)} has no`} ${td.aspect} energy for ${td.name}: the test fails.`)
+				if (td.fail) g.jobs.splice(1, 0, { ...job, eff: td.fail, stage: 'cond', i: 0, picks: {} })
+				return 'ok'
+			}
+			g.fatiguedThisTest = 0
+			g.lastTest = null
+			g.progressTo = null
+			log(g, `${nameOf(g, src!)}: ${s.group ? 'group test' : 'test'} ${td.name} (${td.aspect} + ${td.approach}), difficulty ${diff}.`)
+			g.queue.unshift({ kind: 'test', ranger: who, src, test: s.i, target: null, aspect: td.aspect, approach: td.approach, name: td.name, diff, fatigued: 0, mt: s.i, group: s.group })
+			return 'pause'
+		}
+		case 'challengeAgain': {
+			const c = drawChallenge(g)
+			const sym = CHALLENGE[c].symbol
+			log(g, `Challenge card drawn: ${SYM_LABEL[sym]} ${sym}.`)
+			const again: Job = { ...job, title: job.title, eff: { text: '', pre: [], steps: [{ k: 'either', a: [s], b: [], la: 'Draw another challenge card', lb: 'Stop' }], auto: true }, stage: 'pre', i: 0, picks: {} }
+			g.jobs.splice(1, 0, { ...job, title: `${job.title} (${sym})`, eff: { text: '', pre: [], steps: s[sym], auto: true }, stage: 'pre', i: 0, picks: {} }, again)
+			return 'ok'
+		}
+		case 'keepMoment': {
+			const u = job.src
+			if (u != null && g.inst[u]) {
+				g.inst[u].kept = true
+				g.inst[u].zone = 'surroundings'
+				log(g, `${nameOf(g, u)} stays in the surroundings.`)
 			}
 			return 'ok'
 		}
@@ -1003,8 +1173,12 @@ function runStep(g: Game, s: Step & { when?: Cond }, job: Job, key: string): 'ok
 		}
 		case 'handToFatigue': {
 			const R = g.rangers[r]
-			const opts = R.hand.map((_, k) => k)
-			if (!opts.length) return 'ok'
+			const opts = R.hand.map((_, k) => k).filter((k) => !s.f || fakeMatch(R.hand[k], s.f))
+			if (!opts.length) {
+				if (s.f) job.failed = true
+				return 'ok'
+			}
+			if (s.random && !job.picks[key]) job.picks[key] = [opts[pick(opts.length, g.rng)]]
 			const p = job.picks[key]
 			if (!p) {
 				const what = s.to === 'discard' ? 'Discard a card from your hand.' : 'Place a card from your hand on top of your fatigue stack.'
@@ -1185,13 +1359,33 @@ function sysJob(g: Game, job: Job) {
 			g.dodge = []
 			g.zeroPresence = []
 			g.fatiguedThisTest = 0
-			endTurn(g, job.ranger)
+			if (!job.noTurn) endTurn(g, job.ranger)
 			return
 		case 'endTurn':
 			endTurn(g, job.ranger)
 			return
 		case 'newRound':
 			newRound(g)
+			return
+		case 'momentDone': {
+			const u = job.target
+			if (u != null && g.inst[u] && g.inst[u].attachedTo == null && !g.inst[u].kept) {
+				const nm = nameOf(g, u)
+				removeInst(g, u, 'discard')
+				log(g, `${nm} is discarded.`)
+			}
+			if (g.moment === u) g.moment = null
+			return
+		}
+		case 'drawPath': {
+			// the next path card of this round; what it brings is resolved before the one after
+			const n0 = g.jobs.length
+			drawPathCard(g, job.ranger)
+			g.jobs.unshift(...g.jobs.splice(n0))
+			return
+		}
+		case 'moments':
+			addMoments(g, g.inst[g.location]?.id)
 			return
 	}
 }
@@ -1497,6 +1691,8 @@ function testExtras(g: Game, pr: Extract<import('./types').Prompt, { kind: 'test
 	const extras: TestOptions['extras'] = []
 	const mods: TestOptions['mods'] = []
 	const tArea = pr.target != null && g.inst[pr.target] ? areaOf(g, pr.target) : null
+	// Aid of the Ancestors: "Commit 1 effort to all tests that interact with this being."
+	if (pr.target != null) for (const a of attachments(g, pr.target)) if (/Commit 1 effort to all tests that interact with this being/i.test(flat(a.id))) mods.push({ label: nameOf(g, a.uid), effort: 1 })
 	for (const i of Object.values(g.inst)) {
 		if (i.faceDown || i.kind !== 'ranger') continue
 		const t = flat(i.id)
@@ -1622,6 +1818,18 @@ export function drawChallenge(g: Game): number {
 	return c
 }
 
+/** The card test a test prompt is for (a path moment's own test or one printed on the card). */
+export function testDef(g: Game, pr: Extract<import('./types').Prompt, { kind: 'test' }>): TestDef | undefined {
+	if (pr.src == null || !g.inst[pr.src] || typeof pr.test === 'string') return undefined
+	const p = P(g, pr.src)
+	return pr.mt != null ? p.momentTests?.[pr.mt] : p.tests[pr.test]
+}
+/** Group tests: energy the other Rangers can commit. */
+function othersOf(g: Game, pr: Extract<import('./types').Prompt, { kind: 'test' }>, it: Extract<Intent, { t: 'commit' }>) {
+	if (!pr.group) return []
+	return (it.others ?? []).filter((o, k, a) => o.ranger !== pr.ranger && g.rangers[o.ranger] && a.findIndex((x) => x.ranger === o.ranger) === k)
+}
+
 function commit(g: Game, it: Extract<Intent, { t: 'commit' }>): string | null {
 	const pr = g.queue[0]
 	if (pr?.kind !== 'test') return 'No test to commit to.'
@@ -1629,7 +1837,12 @@ function commit(g: Game, it: Extract<Intent, { t: 'commit' }>): string | null {
 	const R = g.rangers[r]
 	const opt = testOptions(g, pr)
 	const aspect: Aspect = it.swap && opt.swap ? opt.swap.to : pr.aspect
-	if (it.energy < 1 || it.energy > R.energy[aspect]) return `Commit between 1 and ${R.energy[aspect]} ${aspect} energy.`
+	const others = othersOf(g, pr, it)
+	const othersEnergy = others.reduce((n, o) => n + Math.max(0, Math.min(o.energy, g.rangers[o.ranger].energy[pr.aspect])), 0)
+	// Group tests: at least one energy, from any Ranger.
+	const minE = othersEnergy > 0 ? 0 : 1
+	if (it.energy < minE || it.energy > R.energy[aspect]) return pr.group ? 'Commit at least 1 energy between you.' : `Commit between 1 and ${R.energy[aspect]} ${aspect} energy.`
+	const jobs0 = g.jobs.length
 	if (it.swap && opt.swap) {
 		const sw = g.inst[opt.swap.uid]
 		sw.exhausted = true
@@ -1726,8 +1939,33 @@ function commit(g: Game, it: Extract<Intent, { t: 'commit' }>): string | null {
 				log(g, `${card(id).name} finds ${card(x).name} in ${R.name}'s deck and commits it (+${iconsFor(g, r, x, pr.approach)}).`)
 			}
 		}
+	// Group test: the other Rangers' energy and icons
+	let otherEffort = 0
+	const helpers: number[] = []
+	for (const o of others) {
+		const O = g.rangers[o.ranger]
+		const e = Math.max(0, Math.min(o.energy, O.energy[pr.aspect]))
+		O.energy[pr.aspect] -= e
+		let ic = 0
+		const names: string[] = []
+		for (const h of [...new Set(o.discards)].sort((a, b) => b - a)) {
+			const id = O.hand[h]
+			if (!id) continue
+			const n = iconsFor(g, o.ranger, id, pr.approach)
+			if (!n) continue
+			ic += n
+			names.push(card(id).name)
+			O.hand.splice(h, 1)
+			O.discard.push(id)
+		}
+		if (e || ic) {
+			helpers.push(o.ranger)
+			otherEffort += e + ic
+			log(g, `${O.name} helps with ${e} energy${ic ? ` + ${ic} icon${ic > 1 ? 's' : ''} (${names.join(', ')})` : ''}.`)
+		}
+	}
 	const tok = tokenEffort(g, r, pr.target)
-	const base = Math.max(0, it.energy + icons + tok + boost + (it.extra || 0) + xEffort)
+	const base = Math.max(0, it.energy + icons + tok + boost + (it.extra || 0) + xEffort + otherEffort)
 	const ci = drawChallenge(g)
 	const ch = CHALLENGE[ci]
 	const mod = ch[aspect]
@@ -1782,13 +2020,15 @@ function commit(g: Game, it: Extract<Intent, { t: 'commit' }>): string | null {
 	if (success) fire(g, { e: 'success', ranger: r, test: pr.name.toLowerCase(), target: pr.target, effort, src: pr.src, spirit: (pr.target != null && isSpirit(g, pr.target)) || (pr.src != null && isSpirit(g, pr.src)) })
 	if (typeof pr.test === 'string') common(g, pr.test, r, pr.target, effort, success)
 	else if (pr.src != null && g.inst[pr.src]) {
-		const t = P(g, pr.src).tests[pr.test]
+		const t = testDef(g, pr)!
 		const name = `${nameOf(g, pr.src)}: ${t.name}`
 		if (success) addJob(g, { title: name, eff: t.success, src: pr.src, ...base0 })
 		else if (t.fail) addJob(g, { title: `${name} (failed)`, eff: t.fail, src: pr.src, ...base0 })
 		if (t.always) addJob(g, { title: name, eff: t.always, src: pr.src, ...base0 })
 	}
-	for (const u of activeCards(g, r, pr.target)) {
+	// Group tests: each Ranger who committed effort also resolves challenge effects within reach.
+	const active = [...new Set([...activeCards(g, r, pr.target), ...helpers.flatMap((h) => activeCards(g, h, null))])]
+	for (const u of active) {
 		const e = P(g, u).challenge[ch.symbol]
 		if (!e) continue
 		// Response: "Before a <name> would resolve a challenge effect, discard N[progress] from this spirit to exhaust the <name>."
@@ -1809,7 +2049,9 @@ function commit(g: Game, it: Extract<Intent, { t: 'commit' }>): string | null {
 		}
 		addJob(g, { title: `${nameOf(g, u)} ${SYM_LABEL[ch.symbol]}`, eff: e, src: u, ...base0 })
 	}
-	addJob(g, SYS('finishTest', r, { challenge: ci }))
+	addJob(g, SYS('finishTest', r, { challenge: ci, noTurn: pr.mt != null }))
+	// A path moment's test resolves right away, before the rest of the moment.
+	if (pr.mt != null) g.jobs.unshift(...g.jobs.splice(jobs0))
 	return null
 }
 export const SYM_LABEL: Record<Sym, string> = { sun: '☀', mountain: '⛰', crest: '⚜' }
@@ -2159,6 +2401,24 @@ function arrive(g: Game, locId: string) {
 		const rangers = a.who === 'each' ? g.rangers.map((_, k) => k) : [a.who ? who : g.lead]
 		for (const r of rangers) addJob(g, { title: `Arrival at ${c.name}`, eff: a.effect, src: g.location, ranger: r })
 	}
+	addJob(g, SYS('moments', g.lead))
+}
+/** Moments on the Path / in the Valley: which moments set this location uses. */
+export function momentSet(g: Game, locId: string | undefined): string[] {
+	const packs = g.packs ?? []
+	const lp = locId ? card(locId).pack : 'Core'
+	const mov = ({ SiB: 'Spire in Bloom Moments', SoS: 'Shadow of the Storm Moments' } as Record<string, string>)[lp]
+	if (mov && packs.includes('MoV')) return setCards('MoV', mov)
+	if (packs.includes('MoP')) return setCards('MoP', 'Valley Moments')
+	return []
+}
+/** Rulebook, Path Moments: after Arrival Setup, shuffle 1 moment per Ranger into the path deck. */
+function addMoments(g: Game, locId: string | undefined) {
+	const set = momentSet(g, locId).filter((id) => !g.pathDeck.includes(id) && !g.pathDiscard.includes(id))
+	if (!set.length) return
+	const pick = shuffle(set, g.rng).slice(0, nRangers(g))
+	g.pathDeck = shuffle([...g.pathDeck, ...pick], g.rng)
+	log(g, `${pick.length} path moment${pick.length > 1 ? 's are' : ' is'} shuffled into the path deck.`)
 }
 function travel(g: Game, to: string, camp: boolean): string | null {
 	if (g.phase !== 'travel') return 'You can only travel in the travel phase.'
@@ -2249,8 +2509,15 @@ function newRound(g: Game) {
 	log(g, `— Round ${g.round}: path cards —`)
 	const extra = g.extraPath ?? 0
 	g.extraPath = 0
-	for (let k = 0; k < nRangers(g) && !g.ended; k++) drawPathCard(g, (g.lead + k) % nRangers(g))
-	for (let k = 0; k < extra && !g.ended; k++) drawPathCard(g, g.lead)
+	const draws = [...g.rangers.map((_, k) => (g.lead + k) % nRangers(g)), ...Array<number>(extra).fill(g.lead)]
+	for (let k = 0; k < draws.length && !g.ended; k++) {
+		drawPathCard(g, draws[k])
+		// a path moment is resolved before the next card is drawn
+		if (g.moment != null) {
+			for (const d of draws.slice(k + 1)) addJob(g, SYS('drawPath', d))
+			break
+		}
+	}
 	if (!g.ended) g.phase = 'turns'
 }
 
@@ -2571,6 +2838,7 @@ function step(g: Game, it: Intent): string | null {
 			return commit(g, it)
 		case 'cancelTest': {
 			if (head?.kind !== 'test') return 'No test.'
+			if (head.mt != null) return 'This test comes from a path moment: it has to be performed.'
 			if (head.fatigued) return 'You already suffered fatigue for this test; commit at least 1 energy.'
 			g.queue.shift()
 			g.acting = null
@@ -2593,7 +2861,10 @@ function step(g: Game, it: Intent): string | null {
 		}
 		case 'answer': {
 			if (head?.kind !== 'ask') return 'No question.'
-			if (g.jobs[0]) g.jobs[0].asked = it.yes
+			if (g.jobs[0]) {
+				g.jobs[0].asked = it.yes
+				if (it.pick != null) g.jobs[0].option = it.pick
+			}
 			g.queue.shift()
 			return null
 		}

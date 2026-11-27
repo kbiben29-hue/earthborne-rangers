@@ -120,7 +120,7 @@ export function coachFor(g: Game, me: number, seen: Set<string>): CoachStep | nu
 			case 'choose':
 				return { key: 'choose', title: 'Choose a card', body: `${h.text} The cards you can pick glow gold.` }
 			case 'ask':
-				return { key: 'ask', title: 'Your call', body: h.yes ? 'Pick one of the two options.' : 'The game can’t tell this one by itself. Look at the table and answer.' }
+				return { key: 'ask', title: 'Your call', body: h.options ? 'Pick one of the options. A path moment’s choices are printed on the card too (tap it to read).' : h.yes ? 'Pick one of the two options.' : 'The game can’t tell this one by itself. Look at the table and answer.' }
 			case 'aspect':
 				return { key: 'aspect', title: 'Pick an energy type', body: h.text }
 			case 'guide':

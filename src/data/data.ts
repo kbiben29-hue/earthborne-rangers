@@ -105,6 +105,8 @@ export const TERRAINS: Record<string, string> = {
 export const PATH_PACKS: { code: string; name: string }[] = [
 	{ code: 'SiB', name: 'Spire in Bloom' },
 	{ code: 'SoS', name: 'Shadow of the Storm' },
+	{ code: 'MoP', name: 'Moments on the Path' },
+	{ code: 'MoV', name: 'Moments in the Valley' },
 ]
 
 /** Every copy of every card in a set, e.g. setCards('Core', 'Woods'). */

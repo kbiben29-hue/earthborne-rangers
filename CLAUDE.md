@@ -91,6 +91,8 @@ npm run data    # scripts/build-game-data.mjs → src/data/game.json
    (path deck assembly from earthborne.build data: extra cards, side decks `g.decks` — Spire, Otherworld,
    detritus — "Use the X terrain", "no Valley cards"), links both ways, Thoroughfare / Nimbus terrains;
    still by hand: effigies, Silverfin Docks river travel, Parental Bond, many SiB/SoS one-off effects) →
-   Moments on the Path / Valley → Legacy of the Ancestors. Card text for all of them now comes from the
+   Moments on the Path / Valley (done: `parseMoment()` in text.ts, `MOMENT_TEXT` rewrites in scripts.ts,
+   moments shuffled in after Arrival Setup by `addMoments()`, group tests via `commit.others`; still by hand:
+   Market Sale, Whispers from Afar, A Perfect Camping Spot, scouting a moment) → Legacy of the Ancestors. Card text for all of them now comes from the
    earthborne.build data (below); what's left is the rules each box adds (locations on the map, path
    sets, missions, weather, Otherworld deck, effigies, Arcology…). Into the Maw: only its 5 Ranger cards exist.

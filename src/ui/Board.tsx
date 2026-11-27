@@ -106,6 +106,36 @@ export function Board({
 	const [lifted, setLifted] = useState<{ index: number; x: number; y: number } | null>(null)
 	const boardRef = useRef<HTMLDivElement>(null)
 	useMotion(boardRef, g, me, !!drag)
+	// keyboard: Enter = the highlighted button of the open prompt, Esc = close, Ctrl/⌘+Z or U = undo, L = log, 1–4 = Ranger
+	const keys = useRef({ undo, canUndo })
+	keys.current = { undo, canUndo }
+	useEffect(() => {
+		const onKey = (e: KeyboardEvent) => {
+			const t = e.target as HTMLElement | null
+			if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
+			const k = e.key
+			if ((k === 'z' && (e.ctrlKey || e.metaKey)) || (k === 'u' && !e.ctrlKey && !e.metaKey)) {
+				if (keys.current.canUndo) keys.current.undo()
+				e.preventDefault()
+			} else if (k === 'Escape') {
+				setSel(null)
+				setBubble(null)
+				setPick(null)
+				setRefZoom(null)
+				setLifted(null)
+				setPanel('none')
+			} else if (k === 'Enter' && !e.repeat) {
+				const b = boardRef.current?.querySelector<HTMLButtonElement>('.tray .prompt button.primary:not(:disabled), .lesson-card button.primary:not(:disabled)')
+				if (b) {
+					b.click()
+					e.preventDefault()
+				}
+			} else if (k === 'l' && !e.ctrlKey && !e.metaKey) setPanel((p) => (p === 'log' ? 'none' : 'log'))
+			else if (/^[1-4]$/.test(k) && Number(k) <= g.rangers.length) setMe(Number(k) - 1)
+		}
+		window.addEventListener('keydown', onKey)
+		return () => window.removeEventListener('keydown', onKey)
+	}, [g.rangers.length])
 	// how tall the hand + test buttons are, so pop-ups (tray, aim bar) sit just above them
 	useLayoutEffect(() => {
 		const root = boardRef.current
@@ -346,6 +376,10 @@ export function Board({
 
 	const weather = g.weather.filter((u) => g.inst[u])
 	const missions = g.missions.filter((u) => g.inst[u])
+	// path moments: the one being resolved, and any that stay in the surroundings
+	const moments = zoneCards(g, 'surroundings')
+		.filter((i) => i.kind === 'path')
+		.map((i) => i.uid)
 	const along = zoneCards(g, 'along').map((i) => i.uid)
 	const banner =
 		g.phase === 'turns' && !head
@@ -400,6 +434,15 @@ export function Board({
 						))}
 					</div>
 					<div className="row">{weather.map((u) => tile(u))}</div>
+					{moments.length > 0 && (
+						<div className="row moments">
+							{moments.map((u) => (
+								<div key={u} className={u === g.moment ? 'resolving' : ''} title={u === g.moment ? 'Path moment being resolved' : 'In the surroundings'}>
+									{tile(u)}
+								</div>
+							))}
+						</div>
+					)}
 					<div className="loc">{tile(g.location)}</div>
 					<div className="row">{missions.map((u) => tile(u, true))}</div>
 					<div className="piles">
@@ -592,6 +635,15 @@ export function Board({
 					</div>
 				)}
 				<LastTest g={g} keep={lessonOn} />
+				{head && g.moment != null && g.inst[g.moment] && head.kind !== 'guide' && (
+					<button className="moment-tag" onClick={() => setSel({ kind: 'inst', uid: g.moment! })}>
+						<img src={cardImg(g.inst[g.moment].id)} alt="" />
+						<span>
+							Path moment: <b>{nameOf(g, g.moment)}</b>
+							<small> · tap to read the card</small>
+						</span>
+					</button>
+				)}
 				{head && !(choosing && choosing.max === 1) && (
 					<div className={coachOn && hint.buttons?.length ? `coached ${hint.buttons.map((b) => `c-${b}`).join(' ')}` : ''}>
 						<PromptPanel g={g} head={head} dispatch={dispatch} setPick={setPick} onDayOver={onDayOver} hooks={hooks} coachEnergy={coachOn ? hint.energy : undefined} tutorial={lesson} />
@@ -861,12 +913,19 @@ function Commit({ g, head, dispatch, coachEnergy }: { g: Game; head: Extract<Pro
 	const [boosts, setBoosts] = useState<number[]>([])
 	const [resp, setResp] = useState<number[]>([])
 	const [xs, setXs] = useState<string[]>([])
+	// group tests: what the other Rangers add
+	const helpers = head.group ? g.rangers.map((_, k) => k).filter((k) => k !== head.ranger) : []
+	const [help, setHelp] = useState<Record<number, { energy: number; discards: number[] }>>({})
+	const helpOf = (k: number) => help[k] ?? { energy: 0, discards: [] }
+	const helpEnergy = helpers.reduce((n, k) => n + Math.min(helpOf(k).energy, g.rangers[k].energy[head.aspect]), 0)
+	const helpIcons = helpers.reduce((n, k) => n + helpOf(k).discards.reduce((m, i) => m + iconsFor(g, k, g.rangers[k].hand[i], head.approach), 0), 0)
 	const xsOn = opt.extras.filter((x) => xs.includes(x.key))
 	const pool = { ...R.energy, [aspect]: R.energy[aspect] - energy }
 	const iconsOf = (i: number) => iconsFor(g, head.ranger, R.hand[i], head.approach, pool) + (vers.includes(i) ? 1 : 0)
 	const icons = disc.reduce((s, i) => s + iconsOf(i), 0)
 	const tok = tokenEffort(g, head.ranger, head.target)
-	const total = Math.max(0, Math.min(energy, max) + icons + tok + extra + boosts.length + xsOn.reduce((n, x) => n + x.effort, 0) + opt.mods.reduce((n, m) => n + m.effort, 0))
+	const minE = head.group && helpEnergy > 0 ? 0 : 1
+	const total = Math.max(0, Math.min(energy, max) + icons + tok + extra + boosts.length + helpEnergy + helpIcons + xsOn.reduce((n, x) => n + x.effort, 0) + opt.mods.reduce((n, m) => n + m.effort, 0))
 	const dodges = (dodgeRole ? 1 : 0) + xsOn.reduce((n, x) => n + x.dodge, 0) + resp.reduce((n, h) => n + (opt.responses.find((x) => x.hand === h && x.kind === 'dodge')?.n ?? 0), 0)
 	const hurting = opt.inWay.filter((u) => !has(g, u, 'Friendly')).sort((a, b) => presence(g, b) - presence(g, a))
 	const fat = hurting.slice(dodges).reduce((n, u) => n + Math.max(0, presence(g, u) - buffers), 0)
@@ -876,7 +935,9 @@ function Commit({ g, head, dispatch, coachEnergy }: { g: Game; head: Extract<Pro
 		<div className="panel prompt">
 			<h3>
 				{head.name} <small className={`asp-${aspect}`}>{aspect}</small> + <small>{APPROACH_ICON[head.approach]}</small>
+				{head.group && <small className="group-tag">group test</small>}
 			</h3>
+			{head.mt != null && head.src != null && g.inst[head.src] && <p className="sub">{nameOf(g, head.src)} asks for this test{head.group ? ': every Ranger can add energy and icons.' : '.'} Difficulty {head.diff}.</p>}
 			{head.target != null && g.inst[head.target] && <p className="sub">Interacting with {nameOf(g, head.target)}.</p>}
 			{hurting.length > 0 && (
 				<p className={fat ? 'warn' : 'sub'} data-tut="in-way">
@@ -909,7 +970,7 @@ function Commit({ g, head, dispatch, coachEnergy }: { g: Game; head: Extract<Pro
 				<span>
 					{aspect} energy <small>(have {max})</small>
 				</span>
-				<button onClick={() => setEnergy(Math.max(1, energy - 1))}>−</button>
+				<button onClick={() => setEnergy(Math.max(minE, energy - 1))}>−</button>
 				<b>{Math.min(energy, max)}</b>
 				<button onClick={() => setEnergy(Math.min(max, energy + 1))}>+</button>
 			</div>
@@ -976,6 +1037,29 @@ function Commit({ g, head, dispatch, coachEnergy }: { g: Game; head: Extract<Pro
 					))}
 				</div>
 			)}
+			{helpers.map((k) => {
+				const H = g.rangers[k]
+				const h = helpOf(k)
+				const set = (x: Partial<typeof h>) => setHelp({ ...help, [k]: { ...h, ...x } })
+				return (
+					<div className="helper" key={k}>
+						<div className="stepper">
+							<span>
+								{H.name} adds {head.aspect} <small>(has {H.energy[head.aspect]})</small>
+							</span>
+							<button onClick={() => set({ energy: Math.max(0, h.energy - 1) })}>−</button>
+							<b>{Math.min(h.energy, H.energy[head.aspect])}</b>
+							<button onClick={() => set({ energy: Math.min(H.energy[head.aspect], h.energy + 1) })}>+</button>
+						</div>
+						<div className="hand mini">
+							{H.hand.map((id, i) => {
+								const n = iconsFor(g, k, id, head.approach)
+								return <HandCard key={i} id={id} dim={!n} selected={h.discards.includes(i)} note={n ? `+${n}` : undefined} onClick={() => n && set({ discards: h.discards.includes(i) ? h.discards.filter((x) => x !== i) : [...h.discards, i] })} />
+							})}
+						</div>
+					</div>
+				)
+			})}
 			<details>
 				<summary>More (other effort, difficulty)</summary>
 				<div className="stepper">
@@ -998,14 +1082,28 @@ function Commit({ g, head, dispatch, coachEnergy }: { g: Game; head: Extract<Pro
 			<div className="btns">
 				<button
 					className="primary commit-btn"
-					disabled={max < 1}
+					disabled={Math.min(energy, max) + helpEnergy < 1}
 					onClick={() =>
-						dispatch({ t: 'commit', energy: Math.min(energy, max), discards: disc, extra, diff, dodgeRole, buffers, boosts, swap, responses: resp, versatile: vers, extras: xs })
+						dispatch({
+							t: 'commit',
+							energy: Math.max(minE, Math.min(energy, max)),
+							discards: disc,
+							extra,
+							diff,
+							dodgeRole,
+							buffers,
+							boosts,
+							swap,
+							responses: resp,
+							versatile: vers,
+							extras: xs,
+							others: helpers.map((k) => ({ ranger: k, energy: helpOf(k).energy, discards: helpOf(k).discards })),
+						})
 					}
 				>
 					Draw a challenge card
 				</button>
-				<button onClick={() => dispatch({ t: 'cancelTest' })}>Cancel</button>
+				{head.mt == null && <button onClick={() => dispatch({ t: 'cancelTest' })}>Cancel</button>}
 			</div>
 		</div>
 	)
@@ -1077,12 +1175,24 @@ function Ask({ head, dispatch }: { head: Extract<Prompt, { kind: 'ask' }>; dispa
 					Is this true right now? <b>“{head.text}”</b>
 				</p>
 			)}
-			<div className="btns">
-				<button className="primary" onClick={() => dispatch({ t: 'answer', yes: true })}>
-					{head.yes ?? 'Yes'}
-				</button>
-				<button onClick={() => dispatch({ t: 'answer', yes: false })}>{head.no ?? 'No'}</button>
-			</div>
+			{head.options && head.options.length > 0 ? (
+				<div className="btns options">
+					{head.options.map((o, k) => (
+						<button key={k} className={k === 0 ? 'primary' : ''} onClick={() => dispatch({ t: 'answer', yes: k === 0, pick: k })}>
+							<IconText text={o} />
+						</button>
+					))}
+				</div>
+			) : (
+				<div className="btns">
+					<button className="primary" onClick={() => dispatch({ t: 'answer', yes: true })}>
+						<IconText text={head.yes ?? 'Yes'} />
+					</button>
+					<button onClick={() => dispatch({ t: 'answer', yes: false })}>
+						<IconText text={head.no ?? 'No'} />
+					</button>
+				</div>
+			)}
 		</div>
 	)
 }
@@ -1468,6 +1578,9 @@ function Menu({
 				<label className="check">
 					<input type="checkbox" checked={manual} onChange={(e) => setManual(e.target.checked)} /> Show card tools open (manual fixes)
 				</label>
+				<p className="sub keys">
+					Keyboard: <kbd>Enter</kbd> main button · <kbd>Esc</kbd> close · <kbd>U</kbd> or <kbd>⌘/Ctrl Z</kbd> undo · <kbd>L</kbd> log · <kbd>1</kbd>–<kbd>4</kbd> switch Ranger
+				</p>
 				<h4>
 					{R.name} <small>(tap a Ranger's area to switch)</small>
 				</h4>

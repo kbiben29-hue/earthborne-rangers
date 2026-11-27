@@ -23,6 +23,8 @@ export interface Inst {
 	/** Ranger card: whose deck it goes back to. */
 	deckOf?: number
 	kind: 'path' | 'ranger' | 'location' | 'weather' | 'mission' | 'role'
+	/** A path moment that stays (placed in the surroundings) instead of being discarded. */
+	kept?: boolean
 }
 
 export interface Ranger {
@@ -66,7 +68,11 @@ export interface Job {
 	/** Answer to an "ask" condition. */
 	asked?: boolean
 	/** Fully internal job (end of test, new round…). */
-	sys?: 'finishTest' | 'newRound' | 'endTurn'
+	sys?: 'finishTest' | 'newRound' | 'endTurn' | 'momentDone' | 'drawPath' | 'moments'
+	/** finishTest of a path moment's test: no turn ends. */
+	noTurn?: boolean
+	/** Answer to a choice with more than two options. */
+	option?: number
 	challenge?: number
 	/** An instruction before ⏩ couldn't be done. */
 	failed?: boolean
@@ -98,11 +104,15 @@ export type Prompt =
 			name: string
 			diff: number
 			fatigued: number
+			/** A path moment's test (index into its momentTests): not a turn, can't be cancelled. */
+			mt?: number
+			/** Group test: every Ranger may commit energy and icons. */
+			group?: boolean
 	  }
 	| { kind: 'choose'; title: string; text: string; options: number[]; min: number; max: number; key: string; ranger: number }
 	/** Pick a card in a Ranger's hand (or discard pile). */
 	| { kind: 'pickHand'; title: string; text: string; ranger: number; key: string; from: 'hand' | 'discard'; options: number[]; optional: boolean }
-	| { kind: 'ask'; title: string; text: string; ranger: number; yes?: string; no?: string }
+	| { kind: 'ask'; title: string; text: string; ranger: number; yes?: string; no?: string; /** More than two choices (A / B / C). */ options?: string[] }
 	| { kind: 'manual'; title: string; text: string; ranger: number }
 	| { kind: 'aspect'; title: string; text: string; ranger: number; options: Aspect[]; key: string }
 	| { kind: 'guide'; entry: string; why: string; /** Pack of the card that sent you (which guide). */ pack?: string }
@@ -159,6 +169,8 @@ export interface Game {
 	progressTo?: number | null
 	/** Extra path cards the lead Ranger draws next round. */
 	extraPath?: number
+	/** The path moment being resolved (Moments on the Path). */
+	moment?: number | null
 }
 
 export type Intent =
@@ -178,11 +190,13 @@ export type Intent =
 			/** Keys of TestOptions.extras to use. */
 			extras?: string[]
 			versatile?: number[]
+			/** Group tests: what the other Rangers commit. */
+			others?: { ranger: number; energy: number; discards: number[] }[]
 	  }
 	| { t: 'cancelTest' }
 	| { t: 'choose'; uids: number[] }
 	| { t: 'pickHand'; index: number | null }
-	| { t: 'answer'; yes: boolean }
+	| { t: 'answer'; yes: boolean; pick?: number }
 	| { t: 'manualDone' }
 	| { t: 'aspect'; a: Aspect }
 	| { t: 'guideRead' }

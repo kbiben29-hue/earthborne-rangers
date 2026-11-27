@@ -14,6 +14,10 @@ export interface Filter {
 	harm?: number // has at least n harm
 	path?: boolean // path cards only
 	attachedToSelf?: boolean
+	/** In your own play area (equipped gear). */
+	mine?: boolean
+	/** Presence at most n ("beings with 2 or fewer presence"). */
+	maxPresence?: number
 }
 export type Ref =
 	| { r: 'self' }
@@ -42,6 +46,8 @@ export type Amount =
 	| { count: Filter; mult: number }
 	/** n, plus `bonus` if a tale is attached to that Ranger's role. */
 	| { n: number; tale: number }
+	/** Total presence of the matching cards. */
+	| { sumPresence: Filter }
 export type Who = 'you' | 'each' | 'that' | 'onSelf' | 'choose'
 
 export type Step =
@@ -53,7 +59,7 @@ export type Step =
 	| { k: 'rangerToken'; to: Ref | { r: 'roleToken' }; each?: boolean }
 	| { k: 'guide'; entry: string }
 	| { k: 'searchPath'; f: Filter; then: 'discard' | 'play'; alsoDiscard?: boolean }
-	| { k: 'searchSet'; set: string; f: Filter; then: 'shuffle' | 'play' | 'attachLocation'; n?: number }
+	| { k: 'searchSet'; set: string; f: Filter; then: 'shuffle' | 'play' | 'attachLocation'; n?: number; random?: boolean }
 	| { k: 'attach'; what: Ref; to: Ref; faceDown?: boolean }
 	| { k: 'exhaustRole'; who?: Who }
 	| { k: 'exhaustGear'; n: number }
@@ -64,6 +70,14 @@ export type Step =
 	| { k: 'manual'; text: string }
 	| { k: 'byChallenge'; sun: StepWhen[]; mountain: StepWhen[]; crest: StepWhen[] }
 	| { k: 'either'; a: StepWhen[]; b: StepWhen[]; la: string; lb: string }
+	/** Moments on the Path: "YOU CHOOSE / RANGERS CHOOSE / EACH RANGER CHOOSES" A) B) C). */
+	| { k: 'options'; opts: { label: string; steps: StepWhen[] }[]; each?: boolean }
+	/** A path moment's test (Parsed.momentTests[i]); group tests take effort from every Ranger. */
+	| { k: 'momentTest'; i: number; group: boolean }
+	/** "Draw a challenge card and resolve the corresponding effect" that may repeat ("until you choose to stop"). */
+	| { k: 'challengeAgain'; sun: StepWhen[]; mountain: StepWhen[]; crest: StepWhen[] }
+	/** The path moment stays (placed in the surroundings / attached) instead of being discarded. */
+	| { k: 'keepMoment'; to: 'surroundings' }
 	| { k: 'energy'; n: number; aspect?: Aspect; gain: boolean }
 	| { k: 'moveTok'; what: 'progress' | 'harm'; from: Ref; to: Ref; n?: number }
 	| { k: 'fromDiscard'; id: string }
@@ -84,7 +98,22 @@ export type Step =
 	| { k: 'discardTo'; f: Filter; to: 'fatigue' | 'hand'; pick?: boolean }
 	| { k: 'fatigueToDeck'; n: number }
 	/** Place a card from your hand on top of your fatigue stack (optional), then `back` returns from discard to hand. */
-	| { k: 'handToFatigue'; back?: string; to?: 'discard' }
+	| { k: 'handToFatigue'; back?: string; to?: 'discard'; f?: Filter; random?: boolean }
+	/** Run the steps once for each Ranger (that Ranger is "you"). */
+	| { k: 'eachRanger'; steps: StepWhen[] }
+	| { k: 'reshufflePath' }
+	/** Return the weather to the collection and put another weather card (either side) into play. */
+	| { k: 'setWeather'; name: string; tokens?: number }
+	/** Resolve each challenge effect on the weather. */
+	| { k: 'weatherChallenges' }
+	/** Remove every Ranger token from the cards in play. */
+	| { k: 'clearTokens' }
+	/** n random cards from a set on top of the path deck. */
+	| { k: 'setToTop'; set: string; n: number }
+	/** Shuffle the path discard and put it on top of the path deck. */
+	| { k: 'discardToTop' }
+	/** Shuffle this path moment into the top n cards of the path deck. */
+	| { k: 'momentIntoTop'; n: number }
 	| { k: 'dropFatigue' }
 	/** Run a whole effect (with its condition) right after this one. */
 	| { k: 'effect'; eff: Effect }
@@ -120,6 +149,14 @@ export type Cond =
 	| { c: 'spiritspeaking'; negate?: boolean }
 	| { c: 'not'; x: Cond }
 	| { c: 'failedTest' }
+	/** "the weather is (not) inclement / hot / cold", "the weather is Blizzard (or Pristine Snow)". */
+	| { c: 'weather'; trait?: string; names?: string[]; negate?: boolean }
+	/** Effort of the test this effect comes from: at least n (or below n). */
+	| { c: 'effortAtLeast'; n: number; below?: boolean }
+	/** The number the last step counted (cards shuffled in, tokens discarded…) is at most max. */
+	| { c: 'lastAmt'; max: number }
+	| { c: 'terrain'; name: string; negate?: boolean }
+	| { c: 'pathDiscard'; min?: number; max?: number }
 
 export interface Effect {
 	/** Text as printed (flavor removed), for the log and the card viewer. */
@@ -254,6 +291,40 @@ export function sentence(raw: string): Step[] | null {
 	if (!s) return []
 	if (/^(x is|do not resolve|\(this alteration)/i.test(s)) return []
 	let m: RegExpMatchArray | null
+	// Moments on the Path phrasing
+	if ((m = s.match(/^return the (?:current )?weather to the collection and (?:put|replace it with) ([\w' ]+?)(?: into play)?(?: in the surroundings)?(?: with (\d+) \w+ on it)?$/i))) return [{ k: 'setWeather', name: m[1].trim(), tokens: m[2] ? Number(m[2]) : undefined }]
+	if (/^resolve each challenge effect on the weather(?: in an order of your choice)?$/i.test(s)) return [{ k: 'weatherChallenges' }]
+	if (/^remove all \[ranger\] from (?:the )?cards in play$/i.test(s)) return [{ k: 'clearTokens' }]
+	if ((m = s.match(/^(?:randomly add|shuffle) (\d+) (?:random )?cards from the ([\w' ]+?) set (?:to the top of|and place them on top of|on top of) the path deck$/i))) return [{ k: 'setToTop', set: m[2], n: Number(m[1]) }]
+	if (/^shuffle the path discard (?:and place it )?(?:onto|on) (?:the )?top of the path deck$/i.test(s)) return [{ k: 'discardToTop' }]
+	if ((m = s.match(/^shuffle this (?:card|moment) into the top (\d+) cards of the path deck(?: instead)?$/i))) return [{ k: 'momentIntoTop', n: Number(m[1]) }]
+	if ((m = s.match(/^soothe fatigue equal to the total presence of all (\w+?)s? in play$/i))) return [{ k: 'soothe', amt: { sumPresence: { words: [m[1].toLowerCase()] } } }]
+	if ((m = s.match(/^search the path deck(?: and discard)? for the next (.+?) and discard (?:it|them)$/i))) return [{ k: 'searchPath', f: { words: words(m[1]) }, then: 'discard', alsoDiscard: false }]
+	if ((m = s.match(/^put a random (.+?) from the ([\w' ]+?) set into play$/i))) return [{ k: 'searchSet', set: m[2], f: { words: words(m[1]) }, then: 'play', n: 1, random: true }]
+	if ((m = s.match(/^scout (\d+) path cards? for every (\d+) effort$/i))) return [{ k: 'scoutPath', amt: { effort: true, per: Number(m[2]), mult: Number(m[1]) } }]
+	if (/^(?:do nothing|nothing happens)$/i.test(s)) return [{ k: 'note', text: 'Nothing happens.' }]
+	if (/^shuffle the path discard into the path deck$/i.test(s)) return [{ k: 'reshufflePath' }]
+	if ((m = s.match(new RegExp(`^discard (all|${N}) tokens? from the weather$`, 'i')))) return [{ k: 'remTok', what: 'tokens', amt: m[1].toLowerCase() === 'all' ? { all: true } : { n: num(m[1]) }, to: { r: 'weather' } }]
+	if (/^discard (?:one of your equipped gear|an? (?:equipped )?gear (?:from|in) your play area)$/i.test(s)) return [{ k: 'discard', to: { r: 'choose', f: { words: ['gear'], mine: true } } }]
+	if ((m = s.match(new RegExp(`^add ${N}\\s*\\[(harm|progress)\\] to the (path card|being|feature) with the highest presence$`, 'i')))) return [{ k: 'addTok', what: m[2].toLowerCase() as 'harm', amt: { n: num(m[1]) }, to: { r: 'highest', f: { words: [m[3].toLowerCase()] } } }]
+	if ((m = s.match(/^move (?:each|all) (\w+?)s? along the way (?:to )?within reach(?:, treating them as having ambush)?$/i))) return [{ k: 'move', to: { r: 'each', f: { words: [m[1].toLowerCase()], zone: 'along' } }, area: 'reach' }]
+	if ((m = s.match(new RegExp(`^add ${N} (?:unique )?tokens? to one of your equipped (\\w+) for every (\\d+) effort$`, 'i')))) return [{ k: 'addTok', what: 'tokens', amt: { effort: true, per: Number(m[3]), mult: num(m[1]) }, to: { r: 'choose', f: { words: [m[2].toLowerCase()], mine: true } } }]
+	if (/^increase its (?:presence|\[progress\] threshold) by \d+$/i.test(s)) return [{ k: 'note', text: 'It stays attached and changes that card while it does.' }]
+	if ((m = s.match(/^each ranger (.+ or .+)$/i))) {
+		const st = sentence(m[1].replace(/\b(soothe|suffer|draw|discard|gain|exhaust|add)(e?s)\b/gi, '$1').replace(/\btheir\b/gi, 'your'))
+		if (st?.length && !st.some((x) => x.k === 'manual')) return [{ k: 'eachRanger', steps: st }]
+	}
+	if (/^discard (?:1|a|one) (?:random card|card at random) from your hand$/i.test(s)) return [{ k: 'handToFatigue', to: 'discard', random: true }]
+	if ((m = s.match(/^discard an? (gear|card|attribute|moment) from your hand$/i))) return [{ k: 'handToFatigue', to: 'discard', ...(m[1].toLowerCase() === 'card' ? {} : { f: { words: [m[1].toLowerCase()] } }) }]
+	if (/^(?:discard your fatigue stack|each ranger discards their fatigue stack)$/i.test(s)) return /^each/i.test(s) ? [{ k: 'eachRanger', steps: [{ k: 'dropFatigue' }] }] : [{ k: 'dropFatigue' }]
+	if (/^move (?:all|each) cards? within reach (?:to )?along the way$/i.test(s)) return [{ k: 'move', to: { r: 'each', f: { zone: 'reach' } }, area: 'along' }]
+	if ((m = s.match(/^move (?:all|each) (beings?|features?|cards?) with (\d+) or (?:fewer|less) presence (?:to )?along the way$/i))) return [{ k: 'move', to: { r: 'each', f: { words: [singular(m[1].toLowerCase())], maxPresence: Number(m[2]) } }, area: 'along' }]
+	if ((m = s.match(/^gain (\d+) \[(AWA|FIT|FOC|SPI)\](?: energy)? or (?:\d+ )?\[(AWA|FIT|FOC|SPI)\](?: energy)?$/i)))
+		return [{ k: 'either', a: [{ k: 'energy', n: Number(m[1]), aspect: m[2].toUpperCase() as Aspect, gain: true }], b: [{ k: 'energy', n: Number(m[1]), aspect: m[3].toUpperCase() as Aspect, gain: true }], la: `Gain ${m[1]} ${m[2]}`, lb: `Gain ${m[1]} ${m[3]}` }]
+	if ((m = s.match(new RegExp(`^add ${N}\\s*\\[progress\\] to the location or (?:to )?an? (\\w+) (along the way|within reach)$`, 'i')))) {
+		const n = num(m[1])
+		return [{ k: 'either', a: [{ k: 'addTok', what: 'progress', amt: { n }, to: { r: 'location' } }], b: [{ k: 'addTok', what: 'progress', amt: { n }, to: { r: 'choose', f: { words: [m[2].toLowerCase()], zone: /along/i.test(m[3]) ? 'along' : 'reach' } } }], la: `Add ${n} progress to the location`, lb: `Add ${n} progress to a ${m[2]} ${m[3]}` }]
+	}
 	// either: "Discard 2[progress] from this feature or suffer 1 injury"
 	if ((m = s.match(/^(?:either )?(.+?) or (.+)$/i))) {
 		const a = sentence(m[1])
@@ -474,6 +545,16 @@ export function sentence(raw: string): Step[] | null {
 	if ((m = s.match(new RegExp(`^that ranger (soothes|suffers|draws) ${N} (fatigue|injur(?:y|ies)|ranger cards?)$`, 'i'))))
 		return [{ k: m[1].toLowerCase() === 'soothes' ? 'soothe' : m[1].toLowerCase() === 'draws' ? 'drawRanger' : /fatigue/i.test(m[3]) ? 'fatigue' : 'injury', amt: { n: num(m[2]) }, who: 'choose' }]
 	if ((m = s.match(/^draw (\d+) challenge card and do the following based on the challenge icon on that card:?$/i))) return [{ k: 'manual', text: '' }]
+	// "Each Ranger soothes 1 fatigue and gains 1 [FOC] energy" → the same, once for each Ranger
+	if ((m = s.match(/^each ranger (.+)$/i))) {
+		const you = m[1]
+			.replace(/\b(soothe|suffer|draw|discard|gain|return|search|exhaust|reveal|move|add|place|scout|heal)(e?s)\b/gi, '$1')
+			.replace(/\btheir\b/gi, 'your')
+			.replace(/\bthey\b/gi, 'you')
+		const parts = you.split(/,? and (?=(?:soothe|suffer|draw|discard|gain|return|exhaust|move|add|place|scout|heal)\b)/i)
+		const st = parts.map((x) => sentence(x))
+		if (st.length && st.every((x) => x?.length && !x.some((y) => y.k === 'manual'))) return [{ k: 'eachRanger', steps: st.flat() as StepWhen[] }]
+	}
 	return null
 }
 
@@ -490,6 +571,15 @@ export function condition(raw: string): Cond | null {
 			if (all.every(Boolean)) return { c: 'and', all: all as Cond[] }
 		}
 	}
+	if ((m = s.match(/^(?:your|the group's) effort (?:is|was) (\d+) or more$/i))) return { c: 'effortAtLeast', n: Number(m[1]) }
+	if ((m = s.match(/^(?:your|the group's) effort (?:is|was) less than (\d+)$/i))) return { c: 'effortAtLeast', n: Number(m[1]), below: true }
+	if ((m = s.match(/^(\d+) or fewer cards were added to the path deck this way$/i))) return { c: 'lastAmt', max: Number(m[1]) }
+	if ((m = s.match(/^you are (not )?(?:currently )?using (\w+) terrain$/i))) return { c: 'terrain', name: m[2].toLowerCase(), negate: !!m[1] }
+	if ((m = s.match(/^the path discard has (no|\d+ or more) cards?$/i))) return m[1].toLowerCase() === 'no' ? { c: 'pathDiscard', max: 0 } : { c: 'pathDiscard', min: Number(m[1].split(' ')[0]) }
+	if ((m = s.match(/^the weather is (not |neither )?(inclement|hot|cold|underground|environment)(?: nor (inclement|hot|cold))?$/i)))
+		return m[3] ? { c: 'not', x: { c: 'or', any: [{ c: 'weather', trait: m[2].toLowerCase() }, { c: 'weather', trait: m[3].toLowerCase() }] } } : { c: 'weather', trait: m[2].toLowerCase(), negate: !!m[1] }
+	if ((m = s.match(/^the weather is (not )?([A-Z][\w' ]+?)(?: or ([A-Z][\w' ]+?))?$/))) return { c: 'weather', names: [m[2], ...(m[3] ? [m[3]] : [])], negate: !!m[1] }
+	if ((m = s.match(/^it is (not )?([A-Z][\w' ]+?)$/)) && /^(Enveloping Silence|Pristine Snow|Blizzard|Wild Growth|Pollen Clouds|Acidic Ichor)$/.test(m[2])) return { c: 'weather', names: [m[2]], negate: !!m[1] }
 	if ((m = s.match(/^this \w+ is within reach of (?:a|any) ranger$/i))) return { c: 'selfZone', zone: 'reach' }
 	if (/^you suffered fatigue during this test$/i.test(s)) return { c: 'fatiguedTest' }
 	if (/^you failed this test$/i.test(s)) return { c: 'failedTest' }

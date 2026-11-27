@@ -985,7 +985,7 @@ details summary {
 		padding: 4px 8px;
 		grid-template-columns: 36px 1fr;
 	}
-	.mobile-only .last-test img {
+	.mobile-only .last-test img:not(.ic-img) {
 		width: 36px;
 	}
 	.board {
@@ -1074,7 +1074,7 @@ details summary {
 	margin-bottom: 10px;
 	font-size: 0.9rem;
 }
-.last-test img {
+.last-test img:not(.ic-img) {
 	width: 54px;
 	border-radius: 5px;
 }
@@ -1527,7 +1527,7 @@ details summary {
 	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
 	animation: flipin 0.5s ease-out;
 }
-.tray .last-test img {
+.tray .last-test img:not(.ic-img) {
 	animation: cardflip 0.6s ease-out;
 }
 @keyframes cardflip {
@@ -2159,3 +2159,20 @@ body:has(.board.tabletop) {
 	height: 0.85em;
 	margin-right: 0.2em;
 }
+
+/* Moments on the Path */
+.row.moments .resolving > .stack { outline: 3px solid #e9c46a; outline-offset: 2px; border-radius: 8px; animation: momentPulse 1.6s ease-in-out infinite; }
+@keyframes momentPulse { 50% { outline-color: rgba(233, 196, 106, 0.35); } }
+.moment-tag { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: rgba(30, 24, 12, 0.92); color: #f4ead2; border: 1px solid #e9c46a; border-radius: 10px; padding: 6px 8px; margin-bottom: 6px; pointer-events: auto; }
+.moment-tag img { width: 38px; border-radius: 4px; }
+.moment-tag small { opacity: 0.7; }
+.btns.options { flex-direction: column; align-items: stretch; }
+.btns.options button { text-align: left; }
+.group-tag { margin-left: 6px; font-size: 0.7em; background: #e9c46a; color: #2b2010; border-radius: 6px; padding: 1px 6px; vertical-align: middle; }
+.helper { border-top: 1px dashed rgba(255, 255, 255, 0.2); margin-top: 6px; padding-top: 4px; }
+
+/* weather from the campaign tracker, under each day */
+.day .wx { display: block; font-style: normal; font-size: 0.7rem; line-height: 1; opacity: 0.65; margin-top: 1px; }
+.day.now .wx { opacity: 1; }
+kbd { font: inherit; font-size: 0.8em; border: 1px solid var(--line, #bbb); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; background: rgba(255, 255, 255, 0.6); }
+@media (hover: none) { .keys { display: none; } }
