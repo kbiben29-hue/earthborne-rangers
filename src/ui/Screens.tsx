@@ -590,7 +590,7 @@ export function CampaignView({ c, update, startDay, resume, back }: { c: Campaig
 				<ul className="missions">
 					{c.missions.map((m, k) => (
 						<li key={m.id + k}>
-							<img src={cardImg(m.id, m.side)} alt="" />
+							<img src={cardImg(m.id, m.side)} alt="" data-look={m.id} />
 							<div>
 								<b>{card(m.id).name}</b> <small>since day {m.day}</small>
 								<div className="tools">

@@ -4,6 +4,7 @@ import { coachFor, eventNote, INTRO, type CoachStep } from './coach'
 import { GUIDE_PACK, GuideWindow } from './guide'
 import { LESSON, lessonAt } from './lesson'
 import { Spotlight } from './spotlight'
+import { useLongPress } from './look'
 import { ASPECTS, card, CARDS, CHALLENGE, MISSIONS_CORE, SETS, TERRAINS, type Aspect } from '../data/data'
 import {
 	baseTests,
@@ -32,7 +33,7 @@ import type { Game, Intent, ManualOp, Prompt } from '../engine/types'
 import { CardTile, cardImg, HandCard, Icon, IconText, imgUrl, RulesText } from './Card'
 
 type Dispatch = (it: Intent) => string | null
-type Sel = { kind: 'inst'; uid: number } | { kind: 'hand'; ranger: number; index: number } | null
+type Sel = { kind: 'inst'; uid: number } | { kind: 'hand'; ranger: number; index: number } | { kind: 'card'; id: string } | null
 type Pick = { why: string; ok: (uid: number) => boolean; done: (uid: number) => void } | null
 
 export interface CampaignHooks {
@@ -103,9 +104,32 @@ export function Board({
 	const [panel, setPanel] = useState<'none' | 'log' | 'menu' | 'search' | 'map'>('none')
 	const [drag, setDrag] = useState<{ index: number; x: number; y: number } | null>(null)
 	const [refZoom, setRefZoom] = useState<string | null>(null)
+	const [pileView, setPileView] = useState<{ title: string; ids: string[] } | null>(null)
 	const [lifted, setLifted] = useState<{ index: number; x: number; y: number } | null>(null)
 	const boardRef = useRef<HTMLDivElement>(null)
+	const gRef = useRef(g)
+	gRef.current = g
 	useMotion(boardRef, g, me, !!drag)
+	// hold any card (in play, attached, on a pile, in a prompt, a reference card) to read it
+	useLongPress(boardRef, (el) => {
+		const img = el.dataset.lookImg
+		if (img) {
+			setRefZoom(img)
+			return true
+		}
+		const uid = el.dataset.uid != null ? Number(el.dataset.uid) : NaN
+		setBubble(null)
+		setLifted(null)
+		if (!Number.isNaN(uid) && gRef.current.inst[uid]) {
+			setSel({ kind: 'inst', uid })
+			return true
+		}
+		if (el.dataset.look) {
+			setSel({ kind: 'card', id: el.dataset.look })
+			return true
+		}
+		return false
+	})
 	// keyboard: Enter = the highlighted button of the open prompt, Esc = close, Ctrl/⌘+Z or U = undo, L = log, 1–4 = Ranger
 	const keys = useRef({ undo, canUndo })
 	keys.current = { undo, canUndo }
@@ -136,6 +160,38 @@ export function Board({
 		window.addEventListener('keydown', onKey)
 		return () => window.removeEventListener('keydown', onKey)
 	}, [g.rangers.length])
+	// every card on the table fits on screen: the table's card size shrinks (or grows a little) to fit
+	useLayoutEffect(() => {
+		const felt = boardRef.current?.querySelector<HTMLElement>('.felt')
+		if (!felt) return
+		const W = window.innerWidth
+		const H = window.innerHeight
+		const phone = W <= 760
+		const base = phone ? Math.min(84, Math.max(56, W * 0.17)) : Math.min(140, Math.max(62, Math.min(H * 0.105, W * 0.076)))
+		const lo = phone ? 38 : 50
+		const hi = Math.min(base * 1.3, felt.clientWidth / 8)
+		const contentH = () => {
+			let top = Infinity
+			let bottom = -Infinity
+			for (const c of Array.from(felt.children)) {
+				const r = (c as HTMLElement).getBoundingClientRect()
+				top = Math.min(top, r.top)
+				bottom = Math.max(bottom, r.bottom)
+			}
+			const st = getComputedStyle(felt)
+			return bottom - top + parseFloat(st.paddingTop) + parseFloat(st.paddingBottom) + parseFloat(st.rowGap || '0') * 0
+		}
+		let cw = parseFloat(felt.style.getPropertyValue('--cw')) || base
+		for (let k = 0; k < 8; k++) {
+			felt.style.setProperty('--cw', `${cw}px`)
+			const need = contentH()
+			const have = felt.clientHeight
+			if (need <= have && need > have * 0.94) break
+			const next = Math.max(lo, Math.min(hi, cw * (have / need) ** 0.9))
+			if (Math.abs(next - cw) < 0.5) break
+			cw = next
+		}
+	})
 	// how tall the hand + test buttons are, so pop-ups (tray, aim bar) sit just above them
 	useLayoutEffect(() => {
 		const root = boardRef.current
@@ -232,30 +288,6 @@ export function Board({
 			setSel({ kind: 'inst', uid })
 		}
 	}
-	// touch screens have no right-click: holding a card for a moment opens it big
-	const holdTimer = useRef(0)
-	const heldRef = useRef(false)
-	const holdToInspect = (uid: number) => ({
-		onPointerDown: (e: React.PointerEvent) => {
-			if (e.pointerType === 'mouse') return
-			heldRef.current = false
-			window.clearTimeout(holdTimer.current)
-			holdTimer.current = window.setTimeout(() => {
-				heldRef.current = true
-				inspect(uid)
-			}, 550)
-		},
-		onPointerUp: () => window.clearTimeout(holdTimer.current),
-		onPointerLeave: () => window.clearTimeout(holdTimer.current),
-		onPointerCancel: () => window.clearTimeout(holdTimer.current),
-		onClickCapture: (e: React.MouseEvent) => {
-			if (heldRef.current) {
-				heldRef.current = false
-				e.stopPropagation()
-				e.preventDefault()
-			}
-		},
-	})
 	const inspect = (uid: number, e?: React.MouseEvent) => {
 		e?.preventDefault()
 		setBubble(null)
@@ -269,7 +301,7 @@ export function Board({
 		const glow = hint.uids?.includes(uid) && (!choosing || choosing.options.includes(uid)) && (!pick || pick.ok(uid)) ? 'coach' : choosing?.options.includes(uid) ? 'pick' : pick?.ok(uid) ? 'pick' : usable(uid) ? 'use' : ''
 		return (
 			<div className={`stack ${small ? 'small' : ''}`} key={uid}>
-				<div onContextMenu={(e) => inspect(uid, e)} className={`glow-${glow}`} {...holdToInspect(uid)}>
+				<div onContextMenu={(e) => inspect(uid, e)} className={`glow-${glow}`}>
 					<CardTile g={g} inst={inst} small={small} onClick={(e) => tap(uid, e)} selected={(sel?.kind === 'inst' && sel.uid === uid) || bubble?.uid === uid} pickable={glow === 'pick'} />
 				</div>
 				{att.map((a) => (
@@ -418,6 +450,13 @@ export function Board({
 				</button>
 			</header>
 
+			<aside className="siderail" title="Reference cards (tap to read)">
+				{(R.spiritspeak ? ['03206.jpg'] : R.spiritOnce ? ['01431A.jpg', '03206.jpg'] : ['01431A.jpg']).concat('01431B.jpg').map((f) => (
+					<button key={f} className="ref-card" data-look-img={f} onClick={() => setRefZoom(f)}>
+						<img src={imgUrl(f)} alt={f === '01431B.jpg' ? 'Round structure' : f === '03206.jpg' ? 'Spirit Speaker tests' : 'Common tests'} />
+					</button>
+				))}
+			</aside>
 			<main
 				className="felt"
 				onClick={(e) => {
@@ -426,13 +465,6 @@ export function Board({
 				}}
 			>
 				<section className="sky">
-					<div className="refs" title="Reference cards">
-						{(R.spiritspeak ? ['03206.jpg'] : R.spiritOnce ? ['01431A.jpg', '03206.jpg'] : ['01431A.jpg']).concat('01431B.jpg').map((f) => (
-							<button key={f} className="ref-card" onClick={() => setRefZoom(f)}>
-								<img src={imgUrl(f)} alt={f === '01431B.jpg' ? 'Round structure' : f === '03206.jpg' ? 'Spirit Speaker tests' : 'Common tests'} />
-							</button>
-						))}
-					</div>
 					<div className="row">{weather.map((u) => tile(u))}</div>
 					{moments.length > 0 && (
 						<div className="row moments">
@@ -447,7 +479,7 @@ export function Board({
 					<div className="row">{missions.map((u) => tile(u, true))}</div>
 					<div className="piles">
 						<Pile label="Path" n={g.pathDeck.length} back="back-path.jpg" anchor="path-deck" onClick={() => setPanel('search')} />
-						<Pile label="Discard" n={g.pathDiscard.length} face={lastPath} anchor="path-discard" />
+						<Pile label="Discard" n={g.pathDiscard.length} face={lastPath} anchor="path-discard" onClick={() => g.pathDiscard.length && setPileView({ title: 'Path discard', ids: g.pathDiscard.slice().reverse() })} />
 						<Pile label="Challenge" n={g.challenge.length} back="back-challenge.jpg" anchor="challenge" />
 						{Object.entries(g.decks ?? {}).map(([name, d]) => (
 							<Pile key={name} label={name} n={d.length} back="back-path.jpg" anchor={`side-${name}`} />
@@ -484,7 +516,7 @@ export function Board({
 								<div className="piles small">
 									<Pile label="Deck" n={r.deck.length} back="back-player.jpg" anchor={`deck-${k}`} />
 									<Pile label="Fatigue" n={r.fatigue.length} back="back-player.jpg" anchor={`fatigue-${k}`} tilt />
-									<Pile label="Discard" n={r.discard.length} face={r.discard[r.discard.length - 1]} anchor={`discard-${k}`} />
+									<Pile label="Discard" n={r.discard.length} face={r.discard[r.discard.length - 1]} anchor={`discard-${k}`} onClick={() => r.discard.length && setPileView({ title: `${r.name}'s discard`, ids: r.discard.slice().reverse() })} />
 								</div>
 							</div>
 						</div>
@@ -519,7 +551,7 @@ export function Board({
 					)}
 					{turnWhy && turnWhy !== 'role' && idle && <span className="hint">{turnWhy}</span>}
 				</div>
-				<div className="hand fan" data-anchor={`hand-${me}`}>
+				<div className="hand fan" data-anchor={`hand-${me}`} data-look-skip>
 					{R.hand.map((id, i) => {
 						const n = R.hand.length
 						const mid = (n - 1) / 2
@@ -681,6 +713,21 @@ export function Board({
 				</div>
 			)}
 
+			{pileView && (
+				<div className="drawer" onClick={() => setPileView(null)}>
+					<div className="drawer-body wide" onClick={(e) => e.stopPropagation()}>
+						<h3>
+							{pileView.title} <small>({pileView.ids.length}, newest first · hold a card to read it)</small>
+						</h3>
+						<div className="hand mini pile-list">
+							{pileView.ids.map((id, k) => (
+								<HandCard key={k} id={id} onClick={() => setSel({ kind: 'card', id })} />
+							))}
+						</div>
+						<button onClick={() => setPileView(null)}>Close</button>
+					</div>
+				</div>
+			)}
 			{sel && (
 				<div className="drawer" onClick={() => setSel(null)}>
 					<div className="drawer-body" onClick={(e) => e.stopPropagation()}>
@@ -795,7 +842,7 @@ function Pile({ label, n, back, face, anchor, onClick, tilt }: { label: string; 
 	return (
 		<div className={`pile ${tilt ? 'tilt' : ''}`} onClick={onClick} title={`${label}: ${n}`}>
 			<div className="pile-card" data-anchor={anchor}>
-				{n > 0 ? face ? <img src={cardImg(face)} alt="" /> : <img src={imgUrl(back!)} alt="" /> : <div className="pile-empty" />}
+				{n > 0 ? face ? <img src={cardImg(face)} alt="" data-look={face} /> : <img src={imgUrl(back!)} alt="" /> : <div className="pile-empty" />}
 				{n > 1 && <div className="pile-shadow" />}
 				<span className="pile-n">{n}</span>
 			</div>
@@ -1387,6 +1434,24 @@ function Viewer({
 	useRole: boolean
 	turnOk: boolean
 }) {
+	if (sel.kind === 'card') {
+		const c = card(sel.id)
+		return (
+			<div className="viewer">
+				<img className="big" src={cardImg(sel.id)} alt={c.name} />
+				<h3>{c.name}</h3>
+				<RulesText text={c.text} />
+				{c.B && (
+					<>
+						<h4>Other side: {c.B.name}</h4>
+						<img className="big" src={cardImg(sel.id, 'B')} alt={c.B.name} />
+						<RulesText text={c.B.text} />
+					</>
+				)}
+				<button onClick={close}>Close</button>
+			</div>
+		)
+	}
 	if (sel.kind === 'hand') {
 		const R = g.rangers[sel.ranger]
 		const id = R.hand[sel.index]

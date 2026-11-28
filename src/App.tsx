@@ -5,6 +5,37 @@ import type { Game, Intent } from './engine/types'
 import { Board } from './ui/Board'
 import { tutorialSetup } from './ui/lesson'
 import { CampaignView, Home, NewCampaign } from './ui/Screens'
+import { useLongPress } from './ui/look'
+import { card } from './data/data'
+import { cardImg, RulesText } from './ui/Card'
+
+/** Hold a card anywhere outside the table (builder, campaign page, deck editor) to read it. */
+function LookLayer() {
+	const [id, setId] = useState<string | null>(null)
+	useLongPress(null, (el) => {
+		if (el.closest('.board.tabletop') || !el.dataset.look) return false
+		setId(el.dataset.look)
+		return true
+	})
+	if (!id) return null
+	const c = card(id)
+	return (
+		<div className="drawer" onClick={() => setId(null)}>
+			<div className="drawer-body" onClick={(e) => e.stopPropagation()}>
+				<img className="big" src={cardImg(id)} alt={c.name} />
+				<h3>{c.name}</h3>
+				<RulesText text={c.text} />
+				{c.B && (
+					<>
+						<h4>Other side: {c.B.name}</h4>
+						<RulesText text={c.B.text} />
+					</>
+				)}
+				<button onClick={() => setId(null)}>Close</button>
+			</div>
+		</div>
+	)
+}
 
 type Screen = { s: 'home' } | { s: 'new' } | { s: 'campaign'; id: string } | { s: 'day'; id: string }
 
@@ -153,6 +184,7 @@ export default function App() {
 	return (
 		<>
 			{body}
+			<LookLayer />
 			{toast && <div className="toast">{toast}</div>}
 		</>
 	)

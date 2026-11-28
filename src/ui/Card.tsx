@@ -72,7 +72,7 @@ export function CardTile({
 export function HandCard({ id, onClick, selected, dim, note }: { id: string; onClick?: () => void; selected?: boolean; dim?: boolean; note?: string }) {
 	const c: CardDef = card(id)
 	return (
-		<button className={`hand-card ${selected ? 'selected' : ''} ${dim ? 'dim' : ''}`} onClick={onClick} title={c.name}>
+		<button className={`hand-card ${selected ? 'selected' : ''} ${dim ? 'dim' : ''}`} onClick={onClick} title={c.name} data-look={id}>
 			<img src={cardImg(id)} alt={c.name} loading="lazy" draggable={false} />
 			{note && <span className="hand-note">{note}</span>}
 		</button>

@@ -2176,3 +2176,105 @@ body:has(.board.tabletop) {
 .day.now .wx { opacity: 1; }
 kbd { font: inherit; font-size: 0.8em; border: 1px solid var(--line, #bbb); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; background: rgba(255, 255, 255, 0.6); }
 @media (hover: none) { .keys { display: none; } }
+
+/* ---------------- reference cards on a rail beside the table */
+.board.tabletop {
+	grid-template-columns: auto minmax(0, 1fr);
+	grid-template-areas: 'top top' 'rail felt' 'hand hand';
+}
+.board.tabletop .topbar {
+	grid-column: 1 / -1;
+}
+.board.tabletop .handbar {
+	grid-column: 1 / -1;
+}
+.siderail {
+	grid-area: rail;
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	gap: 10px;
+	padding: 8px 0 8px max(8px, env(safe-area-inset-left));
+	--rw: clamp(44px, 7.5vw, 104px);
+}
+.siderail .ref-card {
+	width: var(--rw);
+}
+.felt {
+	grid-area: felt;
+	grid-template-rows: auto auto auto;
+	align-content: center;
+}
+.board.tabletop .along {
+	min-height: calc(var(--cw) * 1.6);
+}
+@media (max-width: 760px) {
+	.siderail {
+		gap: 6px;
+		padding-left: max(4px, env(safe-area-inset-left));
+		--rw: 40px;
+	}
+	.felt {
+		padding-left: 6px;
+		padding-right: 6px;
+		align-content: start;
+	}
+}
+.pile-list {
+	flex-wrap: wrap;
+	max-height: 60dvh;
+	overflow: auto;
+}
+.pile img[data-look] {
+	cursor: zoom-in;
+}
+
+.felt {
+	align-content: safe center;
+}
+/* Ranger mat: role + gear and the piles on top, everything within reach underneath at full width */
+.board.tabletop .mat-body {
+	grid-template-columns: minmax(0, 1fr) auto;
+	grid-template-areas: 'gear piles' 'reach reach';
+	align-items: end;
+}
+.board.tabletop .mat .gear {
+	grid-area: gear;
+	max-width: none;
+	grid-column: auto;
+}
+.board.tabletop .mat .piles {
+	grid-area: piles;
+}
+.board.tabletop .mat .reach {
+	grid-area: reach;
+	min-height: calc(var(--cw) * 1.5);
+}
+@media (max-width: 760px) {
+	/* phones: Ranger mats side by side so everyone's cards stay on screen */
+	.board.tabletop .mats {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+		gap: 6px;
+	}
+	.board.tabletop .mat {
+		padding: 4px 5px 6px;
+	}
+	.board.tabletop .mat-head {
+		gap: 4px;
+	}
+	.board.tabletop .mat-head .energy .en {
+		min-width: 0;
+		padding: 0 4px;
+		font-size: 0.8rem;
+	}
+	.board.tabletop .mat-body {
+		grid-template-areas: 'gear gear' 'piles piles' 'reach reach';
+	}
+	.board.tabletop .mat .piles.small {
+		justify-content: flex-start;
+	}
+	.board.tabletop .tile-name {
+		font-size: 0.58rem;
+	}
+}
