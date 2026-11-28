@@ -54,7 +54,8 @@ npm run data    # scripts/build-game-data.mjs → src/data/game.json
 - `src/ui/` — `Board.tsx` (Holodeck-style table: felt, Ranger mats with piles, fanned hand with green glow on playable cards, click or drag to play, tap a card for its action bubble, right-click / "Look closer" to inspect; prompts float in `.tray`), `motion.ts` (cards fly between piles and zones, keyed by `data-uid` / `data-anchor`), `Screens.tsx` (home, new
   campaign, builder, campaign tracker, deck editor), `Card.tsx`, `styles.css`.
 - `src/ui/look.ts` — `useLongPress()`: hold any card to read it (elements with `data-uid`, `data-look` = card id,
-  `data-look-img`; the hand fan opts out with `data-look-skip`). Board uses it on the table; `LookLayer` in App.tsx on
+  `data-look-img`; the hand fan opts out with `data-look-skip`) and shows just the card (`.peek` overlay, tap to close; right-click /
+  "Look closer" still open the full viewer with actions). Board uses it on the table; `LookLayer` in App.tsx on
   every other screen. The table's `--cw` is fitted on `.felt` each render so every card stays on screen; the
   common tests / round structure cards sit in the `.siderail` on the left.
 - `src/ui/guide.tsx` — campaign guide window: fetches earthborne.build's index + campaign-guides.html from

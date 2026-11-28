@@ -2278,3 +2278,29 @@ kbd { font: inherit; font-size: 0.8em; border: 1px solid var(--line, #bbb); bord
 		font-size: 0.58rem;
 	}
 }
+
+/* hold a card: just the card, big, on top of the table */
+.peek {
+	position: fixed;
+	inset: 0;
+	z-index: 120;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: rgba(8, 14, 11, 0.45);
+	padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+	cursor: zoom-out;
+	animation: peekfade 0.14s ease-out;
+	-webkit-touch-callout: none;
+	user-select: none;
+	-webkit-user-select: none;
+}
+.peek img {
+	max-width: min(92vw, 560px);
+	max-height: 86dvh;
+	border-radius: 16px;
+	box-shadow: 0 24px 60px rgba(0, 0, 0, 0.65);
+	animation: peekpop 0.18s ease-out;
+}
+@keyframes peekfade { from { background: rgba(8, 14, 11, 0); } }
+@keyframes peekpop { from { transform: scale(0.85); opacity: 0.4; } }

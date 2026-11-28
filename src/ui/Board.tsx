@@ -104,6 +104,8 @@ export function Board({
 	const [panel, setPanel] = useState<'none' | 'log' | 'menu' | 'search' | 'map'>('none')
 	const [drag, setDrag] = useState<{ index: number; x: number; y: number } | null>(null)
 	const [refZoom, setRefZoom] = useState<string | null>(null)
+	// a held card, shown big on top of the table (tap to put it back)
+	const [peek, setPeek] = useState<string | null>(null)
 	const [pileView, setPileView] = useState<{ title: string; ids: string[] } | null>(null)
 	const [lifted, setLifted] = useState<{ index: number; x: number; y: number } | null>(null)
 	const boardRef = useRef<HTMLDivElement>(null)
@@ -113,22 +115,14 @@ export function Board({
 	// hold any card (in play, attached, on a pile, in a prompt, a reference card) to read it
 	useLongPress(boardRef, (el) => {
 		const img = el.dataset.lookImg
-		if (img) {
-			setRefZoom(img)
-			return true
-		}
 		const uid = el.dataset.uid != null ? Number(el.dataset.uid) : NaN
+		const inst = Number.isNaN(uid) ? null : gRef.current.inst[uid]
+		const url = img ? imgUrl(img) : inst ? (inst.faceDown ? imgUrl(card(inst.id).back === 'path' ? 'back-path.jpg' : 'back-player.jpg') : cardImg(inst.id, inst.side)) : el.dataset.look ? cardImg(el.dataset.look) : null
+		if (!url) return false
 		setBubble(null)
 		setLifted(null)
-		if (!Number.isNaN(uid) && gRef.current.inst[uid]) {
-			setSel({ kind: 'inst', uid })
-			return true
-		}
-		if (el.dataset.look) {
-			setSel({ kind: 'card', id: el.dataset.look })
-			return true
-		}
-		return false
+		setPeek(url)
+		return true
 	})
 	// keyboard: Enter = the highlighted button of the open prompt, Esc = close, Ctrl/⌘+Z or U = undo, L = log, 1–4 = Ranger
 	const keys = useRef({ undo, canUndo })
@@ -146,6 +140,7 @@ export function Board({
 				setBubble(null)
 				setPick(null)
 				setRefZoom(null)
+				setPeek(null)
 				setLifted(null)
 				setPanel('none')
 			} else if (k === 'Enter' && !e.repeat) {
@@ -356,7 +351,7 @@ export function Board({
 			if (moved) return
 			held = true
 			setLifted(null)
-			setSel({ kind: 'hand', ranger: me, index: i })
+			setPeek(cardImg(g.rangers[me].hand[i]))
 		}, 550)
 		const move = (ev: PointerEvent) => {
 			if (!moved && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 14) return
@@ -721,7 +716,7 @@ export function Board({
 						</h3>
 						<div className="hand mini pile-list">
 							{pileView.ids.map((id, k) => (
-								<HandCard key={k} id={id} onClick={() => setSel({ kind: 'card', id })} />
+								<HandCard key={k} id={id} onClick={() => setPeek(cardImg(id))} />
 							))}
 						</div>
 						<button onClick={() => setPileView(null)}>Close</button>
@@ -776,6 +771,11 @@ export function Board({
 					<div className="drawer-body wide" onClick={(e) => e.stopPropagation()}>
 						<MapView g={g} />
 					</div>
+				</div>
+			)}
+			{peek && (
+				<div className="peek" onClick={() => setPeek(null)} onContextMenu={(e) => e.preventDefault()}>
+					<img src={peek} alt="" draggable={false} />
 				</div>
 			)}
 		</div>

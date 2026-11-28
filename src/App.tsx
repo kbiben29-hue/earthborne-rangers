@@ -7,7 +7,7 @@ import { tutorialSetup } from './ui/lesson'
 import { CampaignView, Home, NewCampaign } from './ui/Screens'
 import { useLongPress } from './ui/look'
 import { card } from './data/data'
-import { cardImg, RulesText } from './ui/Card'
+import { cardImg } from './ui/Card'
 
 /** Hold a card anywhere outside the table (builder, campaign page, deck editor) to read it. */
 function LookLayer() {
@@ -18,21 +18,9 @@ function LookLayer() {
 		return true
 	})
 	if (!id) return null
-	const c = card(id)
 	return (
-		<div className="drawer" onClick={() => setId(null)}>
-			<div className="drawer-body" onClick={(e) => e.stopPropagation()}>
-				<img className="big" src={cardImg(id)} alt={c.name} />
-				<h3>{c.name}</h3>
-				<RulesText text={c.text} />
-				{c.B && (
-					<>
-						<h4>Other side: {c.B.name}</h4>
-						<RulesText text={c.B.text} />
-					</>
-				)}
-				<button onClick={() => setId(null)}>Close</button>
-			</div>
+		<div className="peek" onClick={() => setId(null)} onContextMenu={(e) => e.preventDefault()}>
+			<img src={cardImg(id)} alt={card(id).name} draggable={false} />
 		</div>
 	)
 }
